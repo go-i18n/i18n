@@ -88,7 +88,7 @@ type plural struct {
 // todo
 type Message struct {
 	format  string
-	plurals map[string]*plural
+	plurals map[int]*plural
 }
 
 // todo
@@ -96,7 +96,7 @@ func (m *Message) String(args ...interface{}) string {
 	format := m.format
 	for k, v := range m.plurals {
 		_ = v // todo
-		format = strings.Replace(format, k, "", 1)
+		format = strings.Replace(format, fmt.Sprintf("${%d}", k), "", 1)
 	}
 	return fmt.Sprintf(format, args...)
 }
@@ -122,6 +122,11 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 				format:  k.String(),
 				plurals: nil, // todo
 			}
+
+			if strings.Contains(m.format, "${") {
+				// todo
+			}
+
 			l.messages[s.Name()+"::"+k.Name()] = m
 		}
 	}
