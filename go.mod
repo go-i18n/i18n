@@ -1,3 +1,10 @@
 module github.com/go-i18n/i18n
 
 go 1.16
+
+require (
+	github.com/pkg/errors v0.9.1
+	github.com/smartystreets/goconvey v1.6.4 // indirect
+	golang.org/x/text v0.3.7
+	gopkg.in/ini.v1 v1.62.1
+)
