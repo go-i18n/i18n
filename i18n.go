@@ -5,6 +5,9 @@
 package i18n
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/pkg/errors"
 	"golang.org/x/text/language"
 	"gopkg.in/ini.v1"
@@ -72,34 +75,56 @@ func (s *Store) Locale(lang string) (*Locale, error) {
 	return l, nil
 }
 
+// plural contains contents of the message for the CLDR plural forms.
+type plural struct {
+	zero  string
+	one   string
+	two   string
+	few   string
+	many  string
+	other string
+}
+
 // todo
 type Message struct {
-	// todo
+	format  string
+	plurals map[string]*plural
 }
 
 // todo
 func (m *Message) String(args ...interface{}) string {
-	// todo: handle plural
-	return "<not yet implemented>"
+	format := m.format
+	for k, v := range m.plurals {
+		_ = v // todo
+		format = strings.Replace(format, k, "", 1)
+	}
+	return fmt.Sprintf(format, args...)
 }
 
 // TODO
 type Locale struct {
 	tag      language.Tag
 	desc     string
-	file     *ini.File
 	messages map[string]*Message
 }
 
 // TODO
 func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 	l := &Locale{
-		tag:  tag,
-		desc: desc,
-		file: file,
+		tag:      tag,
+		desc:     desc,
+		messages: map[string]*Message{},
 	}
 
-	// TODO: pre-processing plural
+	for _, s := range file.Sections() {
+		for _, k := range s.Keys() {
+			m := &Message{
+				format:  k.String(),
+				plurals: nil, // todo
+			}
+			l.messages[s.Name()+"::"+k.Name()] = m
+		}
+	}
 
 	return l, nil
 }
@@ -118,7 +143,7 @@ func (l *Locale) Desc() string {
 func (l *Locale) Tr(key string, args ...interface{}) string {
 	m, ok := l.messages[key]
 	if !ok {
-		return key
+		return fmt.Sprintf("<no such key: %s>", key)
 	}
 	return m.String(args...)
 }
