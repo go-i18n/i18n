@@ -22,12 +22,14 @@ type Store struct {
 	langs   []string
 	descs   []string
 	locales map[string]*Locale
+	rules   plural.Rules
 }
 
 // NewStore initializes and returns a new Store.
 func NewStore() *Store {
 	return &Store{
 		locales: make(map[string]*Locale),
+		rules:   plural.DefaultRules(),
 	}
 }
 
@@ -69,7 +71,15 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 	}
 	file.BlockMode = false // We only read from the file
 
-	l, err := newLocale(tag, desc, file)
+	rule := s.rules[tag]
+	if rule == nil {
+		base, confidence := tag.Base()
+		if confidence != language.No {
+			rule = s.rules[language.MustParse(base.String())]
+		}
+	}
+
+	l, err := newLocale(tag, desc, rule, file)
 	if err != nil {
 		return nil, errors.Wrap(err, "new locale")
 	}
@@ -79,29 +89,45 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 	return l, nil
 }
 
-var ErrLocaleNotFound = errors.New("locale not found")
-
 // Locale returns the locale with the given language name.
 func (s *Store) Locale(lang string) (*Locale, error) {
 	l, ok := s.locales[lang]
 	if !ok {
-		return nil, ErrLocaleNotFound
+		return nil, errors.Errorf("locale not found for %q", lang)
 	}
 	return l, nil
 }
 
 // Message represents a message in a locale.
 type Message struct {
+	pluralRule  *plural.Rule
 	format      string
 	pluralForms map[int]map[plural.Form]string
 }
 
-// todo
-func (m *Message) String(args ...interface{}) string {
+// Translate translates the message with the supplied list of arguments.
+func (m *Message) Translate(args ...interface{}) string {
 	format := m.format
 	replaces := make([]string, 0, len(m.pluralForms)*2)
-	for k, v := range m.pluralForms {
-		replaces = append(replaces, fmt.Sprintf("${%d}", k), v[plural.Zero]) // todo
+	for index, forms := range m.pluralForms {
+		old := fmt.Sprintf("${%d}", index)
+		if len(args) < index {
+			replaces = append(replaces, old, fmt.Sprintf("<no arg for index %d>", index))
+			continue
+		}
+
+		ops, err := plural.NewOperands(args[index-1])
+		if err != nil {
+			replaces = append(replaces, old, fmt.Sprintf("<%v>", err))
+			continue
+		}
+
+		form := plural.Other
+		if m.pluralRule != nil {
+			form = m.pluralRule.PluralFormFunc(ops)
+		}
+
+		replaces = append(replaces, old, forms[form])
 	}
 	format = strings.NewReplacer(replaces...).Replace(format)
 	return fmt.Sprintf(format, args...)
@@ -118,7 +144,7 @@ var placeholderRe = regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+)}`) // e.g. ${fil
 
 // newLocale creates a new Locale with given language tag, description and the
 // raw locale file. The "[plurals]" section is reserved to define all plurals.
-func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
+func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File) (*Locale, error) {
 	const pluralsSection = "plurals"
 	s := file.Section(pluralsSection)
 	keys := s.Keys()
@@ -163,10 +189,13 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 					placeholder := submatch[0]
 					noun := submatch[1]
 					index, _ := strconv.Atoi(submatch[2])
+					if index < 1 {
+						return nil, errors.Errorf("the smallest index is 1 but got %d for %q", index, placeholder)
+					}
 
 					p, ok := pluralForms[noun]
 					if !ok {
-						replaces = append(replaces, placeholder, fmt.Sprintf("<no such pluralForms: %s>", noun))
+						replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
 						continue
 					}
 
@@ -177,6 +206,7 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 			}
 
 			messages[s.Name()+"::"+k.Name()] = &Message{
+				pluralRule:  rule,
 				format:      format,
 				pluralForms: pluralFormsByIndex,
 			}
@@ -206,5 +236,5 @@ func (l *Locale) Translate(key string, args ...interface{}) string {
 	if !ok {
 		return fmt.Sprintf("<no such key: %s>", key)
 	}
-	return m.String(args...)
+	return m.Translate(args...)
 }
