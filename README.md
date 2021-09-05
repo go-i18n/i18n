@@ -15,15 +15,56 @@ The minimum requirement of Go is **1.16**.
 
 ## Getting started
 
-_Stay tuned!_
+```ini
+# locale_en-US.ini
+[plurals]
+file.one = file
+file.other = files
 
-## Getting help
+dog.one = dog
+dog.other = dogs
 
-_Stay tuned!_
+[messages]
+test1 = This patch has %[1]d changed ${file, 1} and deleted %[2]d ${file, 2}
+test2 = I have %[1]d ${dog, 1}
+```
 
-## Users and projects
+```ini
+# locale_zh-CN.ini
+[plurals]
+file.other = 文件
 
-_Stay tuned!_
+[messages]
+test1 = 该补丁变更了 %[1]d 个${file, 1}并删除了 %[2]d 个${file, 2}
+```
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/go-i18n/i18n"
+)
+
+func main() {
+	s := i18n.NewStore()
+	l1, err := s.AddLocale("en-US", "English", "locale_en-US.ini")
+	// ... handler error
+
+	l2, err := s.AddLocale("zh-CN", "简体中文", "locale_zh-CN.ini")
+	// ... handler error
+
+	fmt.Println(l1.Translate("messages::test1", 1, 2))
+	// => "This patch has 1 changed file and deleted 2 files"
+
+	fmt.Println(l2.Translate("messages::test1", 1, 2))
+	// => "该补丁变更了 1 个文件并删除了 2 个文件"
+
+	fmt.Println(l2.TranslateWithFallback(l1, "messages::test2", 1))
+	// => "I have 1 dog"
+}
+```
 
 ## License
 
