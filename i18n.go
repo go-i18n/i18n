@@ -98,27 +98,43 @@ func (s *Store) Locale(lang string) (*Locale, error) {
 	return l, nil
 }
 
+type pluralPlaceholder struct {
+	name  string
+	forms map[plural.Form]string
+}
+
 // Message represents a message in a locale.
 type Message struct {
-	pluralRule  *plural.Rule
-	format      string
-	pluralForms map[int]map[plural.Form]string
+	pluralRule   *plural.Rule
+	format       string
+	placeholders map[int]*pluralPlaceholder
 }
 
 // Translate translates the message with the supplied list of arguments.
 func (m *Message) Translate(args ...interface{}) string {
+	if len(args) == 0 {
+		return m.format
+	}
+	if len(m.placeholders) == 0 {
+		return fmt.Sprintf(m.format, args...)
+	}
+
+	// NOTE: strings.NewReplacer makes >3x more allocations and 5x slower than strings.Replace.
+	//  For strings.NewReplacer:
+	//  	BenchmarkLocale_Translate_Plural-16    	  987433	      1097 ns/op	    2585 B/op	      10 allocs/op
+	//  For strings.Replace:
+	//  	BenchmarkLocale_Translate_Plural-16    	 4316941	       285.3 ns/op	      80 B/op	       3 allocs/op
+
 	format := m.format
-	replaces := make([]string, 0, len(m.pluralForms)*2)
-	for index, forms := range m.pluralForms {
-		old := fmt.Sprintf("${%d}", index)
+	for index, placeholder := range m.placeholders {
 		if len(args) < index {
-			replaces = append(replaces, old, fmt.Sprintf("<no arg for index %d>", index))
+			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<no arg for index %d>", index), 1)
 			continue
 		}
 
 		ops, err := plural.NewOperands(args[index-1])
 		if err != nil {
-			replaces = append(replaces, old, fmt.Sprintf("<%v>", err))
+			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<%v>", err), 1)
 			continue
 		}
 
@@ -126,10 +142,8 @@ func (m *Message) Translate(args ...interface{}) string {
 		if m.pluralRule != nil {
 			form = m.pluralRule.PluralFormFunc(ops)
 		}
-
-		replaces = append(replaces, old, forms[form])
+		format = strings.Replace(format, placeholder.name, placeholder.forms[form], 1)
 	}
-	format = strings.NewReplacer(replaces...).Replace(format)
 	return fmt.Sprintf(format, args...)
 }
 
@@ -178,13 +192,13 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 		for _, k := range s.Keys() {
 			// NOTE: Majority of messages do not need to deal with plurals, thus it makes
 			//  sense to leave them with a nil map to save some memory space.
-			var pluralFormsByIndex map[int]map[plural.Form]string
+			var placeholders map[int]*pluralPlaceholder
 
 			format := k.String()
 			if strings.Contains(format, "${") {
 				matches := placeholderRe.FindAllStringSubmatch(format, -1)
 				replaces := make([]string, 0, len(matches)*2)
-				pluralFormsByIndex = make(map[int]map[plural.Form]string, len(matches))
+				placeholders = make(map[int]*pluralPlaceholder, len(matches))
 				for _, submatch := range matches {
 					placeholder := submatch[0]
 					noun := submatch[1]
@@ -193,22 +207,26 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 						return nil, errors.Errorf("the smallest index is 1 but got %d for %q", index, placeholder)
 					}
 
-					p, ok := pluralForms[noun]
+					forms, ok := pluralForms[noun]
 					if !ok {
 						replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
 						continue
 					}
 
-					replaces = append(replaces, placeholder, fmt.Sprintf("${%d}", index))
-					pluralFormsByIndex[index] = p
+					name := fmt.Sprintf("${%d}", index)
+					replaces = append(replaces, placeholder, name)
+					placeholders[index] = &pluralPlaceholder{
+						name:  name,
+						forms: forms,
+					}
 				}
 				format = strings.NewReplacer(replaces...).Replace(format)
 			}
 
 			messages[s.Name()+"::"+k.Name()] = &Message{
-				pluralRule:  rule,
-				format:      format,
-				pluralForms: pluralFormsByIndex,
+				pluralRule:   rule,
+				format:       format,
+				placeholders: placeholders,
 			}
 		}
 	}
