@@ -119,17 +119,22 @@ func (m *Message) Translate(args ...interface{}) string {
 		return fmt.Sprintf(m.format, args...)
 	}
 
+	// NOTE: strings.NewReplacer makes >3x more allocations and 5x slower than strings.Replace.
+	//  For strings.NewReplacer:
+	//  	BenchmarkLocale_Translate_Plural-16    	  987433	      1097 ns/op	    2585 B/op	      10 allocs/op
+	//  For strings.Replace:
+	//  	BenchmarkLocale_Translate_Plural-16    	 4316941	       285.3 ns/op	      80 B/op	       3 allocs/op
+
 	format := m.format
-	replaces := make([]string, 0, len(m.placeholders)*2)
 	for index, placeholder := range m.placeholders {
 		if len(args) < index {
-			replaces = append(replaces, placeholder.name, fmt.Sprintf("<no arg for index %d>", index))
+			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<no arg for index %d>", index), 1)
 			continue
 		}
 
 		ops, err := plural.NewOperands(args[index-1])
 		if err != nil {
-			replaces = append(replaces, placeholder.name, fmt.Sprintf("<%v>", err))
+			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<%v>", err), 1)
 			continue
 		}
 
@@ -137,10 +142,8 @@ func (m *Message) Translate(args ...interface{}) string {
 		if m.pluralRule != nil {
 			form = m.pluralRule.PluralFormFunc(ops)
 		}
-
-		replaces = append(replaces, placeholder.name, placeholder.forms[form])
+		format = strings.Replace(format, placeholder.name, placeholder.forms[form], 1)
 	}
-	format = strings.NewReplacer(replaces...).Replace(format)
 	return fmt.Sprintf(format, args...)
 }
 
