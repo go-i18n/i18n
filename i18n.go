@@ -22,6 +22,13 @@ type Store struct {
 	locales map[string]*Locale
 }
 
+// NewStore initializes and returns a new Store.
+func NewStore() *Store {
+	return &Store{
+		locales: make(map[string]*Locale),
+	}
+}
+
 // add attempts to add the given locale into the store. It returns true if it
 // was successfully added, false if a locale with the same language name has
 // already existed.
@@ -38,10 +45,10 @@ func (s *Store) add(l *Locale) bool {
 }
 
 // TODO
-func (s *Store) SetLocale(lang, desc string, locale interface{}, others ...interface{}) error {
+func (s *Store) AddLocale(lang, desc string, source interface{}, others ...interface{}) (*Locale, error) {
 	tag, err := language.Parse(lang)
 	if err != nil {
-		return errors.Wrap(err, "parse lang")
+		return nil, errors.Wrap(err, "parse lang")
 	}
 
 	file, err := ini.LoadSources(
@@ -49,22 +56,22 @@ func (s *Store) SetLocale(lang, desc string, locale interface{}, others ...inter
 			IgnoreInlineComment:         true,
 			UnescapeValueCommentSymbols: true,
 		},
-		locale,
+		source,
 		others...,
 	)
 	if err != nil {
-		return errors.Wrap(err, "load sources")
+		return nil, errors.Wrap(err, "load sources")
 	}
 	file.BlockMode = false
 
 	l, err := newLocale(tag, desc, file)
 	if err != nil {
-		return errors.Wrap(err, "new locale")
+		return nil, errors.Wrap(err, "new locale")
 	}
 	if !s.add(l) {
-		return errors.Errorf("duplicated locales for %q", lang)
+		return nil, errors.Errorf("duplicated locales for %q", lang)
 	}
-	return nil
+	return l, nil
 }
 
 var ErrLocaleNotFound = errors.New("locale not found")
@@ -152,12 +159,20 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 
 	messages := make(map[string]*Message)
 	for _, s := range file.Sections() {
+		if s.Name() == pluralsSection {
+			continue
+		}
+
 		for _, k := range s.Keys() {
+			// NOTE: Majority of messages do not need to deal with plurals, thus it makes
+			//  sense to leave them with a nil map to save some memory space.
+			var pluralsByIndex map[int]*plural
+
 			format := k.String()
-			pluralsByIndex := make(map[int]*plural)
 			if strings.Contains(format, "${") {
 				matches := placeholderRe.FindAllStringSubmatch(format, -1)
 				replaces := make([]string, 0, len(matches)*2)
+				pluralsByIndex = make(map[int]*plural, len(matches))
 				for _, submatch := range matches {
 					placeholder := submatch[0]
 					noun := submatch[1]
