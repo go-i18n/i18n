@@ -110,12 +110,41 @@ type Locale struct {
 
 // TODO
 func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
-	l := &Locale{
-		tag:      tag,
-		desc:     desc,
-		messages: map[string]*Message{},
+	const pluralsSection = "plurals"
+	s := file.Section(pluralsSection)
+	keys := s.Keys()
+	plurals := make(map[string]*plural, len(keys))
+	for _, k := range s.Keys() {
+		fields := strings.SplitN(k.Name(), ".", 2)
+		if len(fields) != 2 {
+			continue
+		}
+
+		noun, form := fields[0], fields[1]
+
+		p, ok := plurals[noun]
+		if !ok {
+			p = &plural{}
+			plurals[noun] = p
+		}
+
+		switch form {
+		case "zero":
+			p.zero = k.String()
+		case "one":
+			p.one = k.String()
+		case "two":
+			p.two = k.String()
+		case "few":
+			p.few = k.String()
+		case "many":
+			p.many = k.String()
+		case "other":
+			p.other = k.String()
+		}
 	}
 
+	messages := make(map[string]*Message)
 	for _, s := range file.Sections() {
 		for _, k := range s.Keys() {
 			m := &Message{
@@ -127,11 +156,15 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 				// todo
 			}
 
-			l.messages[s.Name()+"::"+k.Name()] = m
+			messages[s.Name()+"::"+k.Name()] = m
 		}
 	}
 
-	return l, nil
+	return &Locale{
+		tag:      tag,
+		desc:     desc,
+		messages: messages,
+	}, nil
 }
 
 // TODO
