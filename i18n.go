@@ -13,6 +13,8 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/text/language"
 	"gopkg.in/ini.v1"
+
+	"github.com/go-i18n/i18n/internal/plural"
 )
 
 // Store contains a collection of locales and their descriptive names.
@@ -88,28 +90,18 @@ func (s *Store) Locale(lang string) (*Locale, error) {
 	return l, nil
 }
 
-// plural contains contents of the message for the CLDR plural forms.
-type plural struct {
-	zero  string
-	one   string
-	two   string
-	few   string
-	many  string
-	other string
-}
-
 // Message represents a message in a locale.
 type Message struct {
-	format  string
-	plurals map[int]*plural
+	format      string
+	pluralForms map[int]map[plural.Form]string
 }
 
 // todo
 func (m *Message) String(args ...interface{}) string {
 	format := m.format
-	replaces := make([]string, 0, len(m.plurals)*2)
-	for k, v := range m.plurals {
-		replaces = append(replaces, fmt.Sprintf("${%d}", k), v.zero) // todo
+	replaces := make([]string, 0, len(m.pluralForms)*2)
+	for k, v := range m.pluralForms {
+		replaces = append(replaces, fmt.Sprintf("${%d}", k), v[plural.Zero]) // todo
 	}
 	format = strings.NewReplacer(replaces...).Replace(format)
 	return fmt.Sprintf(format, args...)
@@ -130,7 +122,7 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 	const pluralsSection = "plurals"
 	s := file.Section(pluralsSection)
 	keys := s.Keys()
-	plurals := make(map[string]*plural, len(keys))
+	pluralForms := make(map[string]map[plural.Form]string, len(keys))
 	for _, k := range s.Keys() {
 		fields := strings.SplitN(k.Name(), ".", 2)
 		if len(fields) != 2 {
@@ -139,25 +131,15 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 
 		noun, form := fields[0], fields[1]
 
-		p, ok := plurals[noun]
+		p, ok := pluralForms[noun]
 		if !ok {
-			p = &plural{}
-			plurals[noun] = p
+			p = make(map[plural.Form]string, 6)
+			pluralForms[noun] = p
 		}
 
-		switch form {
-		case "zero":
-			p.zero = k.String()
-		case "one":
-			p.one = k.String()
-		case "two":
-			p.two = k.String()
-		case "few":
-			p.few = k.String()
-		case "many":
-			p.many = k.String()
-		case "other":
-			p.other = k.String()
+		switch plural.Form(form) {
+		case plural.Zero, plural.One, plural.Two, plural.Few, plural.Many, plural.Other:
+			p[plural.Form(form)] = k.String()
 		}
 	}
 
@@ -170,33 +152,33 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 		for _, k := range s.Keys() {
 			// NOTE: Majority of messages do not need to deal with plurals, thus it makes
 			//  sense to leave them with a nil map to save some memory space.
-			var pluralsByIndex map[int]*plural
+			var pluralFormsByIndex map[int]map[plural.Form]string
 
 			format := k.String()
 			if strings.Contains(format, "${") {
 				matches := placeholderRe.FindAllStringSubmatch(format, -1)
 				replaces := make([]string, 0, len(matches)*2)
-				pluralsByIndex = make(map[int]*plural, len(matches))
+				pluralFormsByIndex = make(map[int]map[plural.Form]string, len(matches))
 				for _, submatch := range matches {
 					placeholder := submatch[0]
 					noun := submatch[1]
 					index, _ := strconv.Atoi(submatch[2])
 
-					p, ok := plurals[noun]
+					p, ok := pluralForms[noun]
 					if !ok {
-						replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
+						replaces = append(replaces, placeholder, fmt.Sprintf("<no such pluralForms: %s>", noun))
 						continue
 					}
 
 					replaces = append(replaces, placeholder, fmt.Sprintf("${%d}", index))
-					pluralsByIndex[index] = p
+					pluralFormsByIndex[index] = p
 				}
 				format = strings.NewReplacer(replaces...).Replace(format)
 			}
 
 			messages[s.Name()+"::"+k.Name()] = &Message{
-				format:  format,
-				plurals: pluralsByIndex,
+				format:      format,
+				pluralForms: pluralFormsByIndex,
 			}
 		}
 	}
