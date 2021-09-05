@@ -250,8 +250,18 @@ func (l *Locale) Description() string {
 
 // Translate uses the locale to translate the message of the given key.
 func (l *Locale) Translate(key string, args ...interface{}) string {
+	return l.TranslateWithFallback(nil, key, args...)
+}
+
+// TranslateWithFallback uses the locale to translate the message of the given
+// key. It attempts to use the `fallback` to translate if the given key does not
+// exist in the locale.
+func (l *Locale) TranslateWithFallback(fallback *Locale, key string, args ...interface{}) string {
 	m, ok := l.messages[key]
 	if !ok {
+		if fallback != nil {
+			return fallback.Translate(key, args...)
+		}
 		return fmt.Sprintf("<no such key: %s>", key)
 	}
 	return m.Translate(args...)

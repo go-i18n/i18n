@@ -120,6 +120,55 @@ func TestLocale_Translate(t *testing.T) {
 	}
 }
 
+func TestLocale_TranslateWithFallback(t *testing.T) {
+	s := NewStore()
+	l1, err := s.AddLocale(
+		"en-US",
+		"English",
+		sampleSource,
+	)
+	assert.Nil(t, err)
+
+	l2, err := s.AddLocale(
+		"zh-CN",
+		"简体中文",
+		[]byte(`
+[plurals]
+file.other = 文件
+
+[messages]
+test1 = 我变更了 %[1]d 个${file, 1}并删除了 %[2]d 个${file, 2}
+`),
+	)
+	assert.Nil(t, err)
+
+	tests := []struct {
+		name string
+		key  string
+		args []interface{}
+		want string
+	}{
+		{
+			name: "good",
+			key:  "messages::test1",
+			args: []interface{}{1, 2},
+			want: `我变更了 1 个文件并删除了 2 个文件`,
+		},
+		{
+			name: "fallback",
+			key:  "messages::test4",
+			args: nil,
+			want: `I have a dream`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := l2.TranslateWithFallback(l1, test.key, test.args...)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func BenchmarkLocale_Translate(b *testing.B) {
 	l, err := NewStore().AddLocale(
 		"en-US",
