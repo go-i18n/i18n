@@ -15,14 +15,16 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-// TODO
+// Store contains a collection of locales and their descriptive names.
 type Store struct {
 	langs   []string
 	descs   []string
 	locales map[string]*Locale
 }
 
-// TODO
+// add attempts to add the given locale into the store. It returns true if it
+// was successfully added, false if a locale with the same language name has
+// already existed.
 func (s *Store) add(l *Locale) bool {
 	if _, ok := s.locales[l.Lang()]; ok {
 		return false
@@ -67,7 +69,7 @@ func (s *Store) SetLocale(lang, desc string, locale interface{}, others ...inter
 
 var ErrLocaleNotFound = errors.New("locale not found")
 
-// todo
+// Locale returns the locale with the given language name.
 func (s *Store) Locale(lang string) (*Locale, error) {
 	l, ok := s.locales[lang]
 	if !ok {
@@ -86,7 +88,7 @@ type plural struct {
 	other string
 }
 
-// todo
+// Message represents a message in a locale.
 type Message struct {
 	format  string
 	plurals map[int]*plural
@@ -97,14 +99,13 @@ func (m *Message) String(args ...interface{}) string {
 	format := m.format
 	replaces := make([]string, 0, len(m.plurals)*2)
 	for k, v := range m.plurals {
-		_ = v // todo
-		replaces = append(replaces, fmt.Sprintf("${%d}", k), "???")
+		replaces = append(replaces, fmt.Sprintf("${%d}", k), v.zero) // todo
 	}
 	format = strings.NewReplacer(replaces...).Replace(format)
 	return fmt.Sprintf(format, args...)
 }
 
-// TODO
+// Locale represents a locale with target language and a collection of messages.
 type Locale struct {
 	tag      language.Tag
 	desc     string
@@ -198,7 +199,7 @@ func (l *Locale) Description() string {
 	return l.desc
 }
 
-// todo
+// Translate uses the locale to translate the message of the given key.
 func (l *Locale) Translate(key string, args ...interface{}) string {
 	m, ok := l.messages[key]
 	if !ok {
