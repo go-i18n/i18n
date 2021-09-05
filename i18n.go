@@ -44,7 +44,10 @@ func (s *Store) add(l *Locale) bool {
 	return true
 }
 
-// TODO
+// AddLocale adds a locale with given language name and description that is
+// loaded from the list of sources. Please refer to INI documentation regarding
+// what is considered as a valid data source:
+// https://ini.unknwon.io/docs/howto/load_data_sources.
 func (s *Store) AddLocale(lang, desc string, source interface{}, others ...interface{}) (*Locale, error) {
 	tag, err := language.Parse(lang)
 	if err != nil {
@@ -62,7 +65,7 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 	if err != nil {
 		return nil, errors.Wrap(err, "load sources")
 	}
-	file.BlockMode = false
+	file.BlockMode = false // We only read from the file
 
 	l, err := newLocale(tag, desc, file)
 	if err != nil {
@@ -119,7 +122,10 @@ type Locale struct {
 	messages map[string]*Message
 }
 
-// TODO
+var placeholderRe = regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+)}`) // e.g. ${file, 1} => ["file", "1"]
+
+// newLocale creates a new Locale with given language tag, description and the
+// raw locale file. The "[plurals]" section is reserved to define all plurals.
 func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 	const pluralsSection = "plurals"
 	s := file.Section(pluralsSection)
@@ -154,8 +160,6 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 			p.other = k.String()
 		}
 	}
-
-	placeholderRe := regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+)}`) // e.g. ${file, 1} => ["file", "1"]
 
 	messages := make(map[string]*Message)
 	for _, s := range file.Sections() {
