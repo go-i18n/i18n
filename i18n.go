@@ -26,7 +26,6 @@ func (s *Store) add(l *Locale) bool {
 		return false
 	}
 
-	// lc.id = len(d.langs)
 	s.langs = append(s.langs, l.Lang())
 	s.descs = append(s.descs, l.Desc())
 	s.locales[l.Lang()] = l
@@ -147,16 +146,15 @@ func newLocale(tag language.Tag, desc string, file *ini.File) (*Locale, error) {
 	messages := make(map[string]*Message)
 	for _, s := range file.Sections() {
 		for _, k := range s.Keys() {
-			m := &Message{
-				format:  k.String(),
+			format := k.String()
+			if strings.Contains(format, "${") {
+				// todo: parse plural placeholders
+			}
+
+			messages[s.Name()+"::"+k.Name()] = &Message{
+				format:  format,
 				plurals: nil, // todo
 			}
-
-			if strings.Contains(m.format, "${") {
-				// todo
-			}
-
-			messages[s.Name()+"::"+k.Name()] = m
 		}
 	}
 
