@@ -47,11 +47,7 @@ func TestStore_Locale(t *testing.T) {
 	})
 }
 
-func TestLocale_Translate(t *testing.T) {
-	l, err := NewStore().AddLocale(
-		"en-US",
-		"English",
-		[]byte(`
+var sampleSource = []byte(`
 [plurals]
 file.one = file
 file.other = files
@@ -66,7 +62,16 @@ dog.other = %(dog.two)s
 test1 = I have %[1]d changed ${file, 1} and deleted %[2]d ${file, 2}
 test2 = I bought %[1]d ${cat, 1} and sold %[2]d ${dog, 2}
 test3 = I have %[1]d ${dog, 10}
-`),
+test4 = I have a dream
+test5 = My name is %s
+test6 = I have %[1]d ${dog, 1}
+`)
+
+func TestLocale_Translate(t *testing.T) {
+	l, err := NewStore().AddLocale(
+		"en-US",
+		"English",
+		sampleSource,
 	)
 	assert.Nil(t, err)
 
@@ -95,6 +100,12 @@ test3 = I have %[1]d ${dog, 10}
 			want: `I have 1 <no arg for index 10>`,
 		},
 		{
+			name: "no plural",
+			key:  "messages::test4",
+			args: nil,
+			want: `I have a dream`,
+		},
+		{
 			name: "no such key",
 			key:  "messages::404",
 			args: nil,
@@ -106,5 +117,44 @@ test3 = I have %[1]d ${dog, 10}
 			got := l.Translate(test.key, test.args...)
 			assert.Equal(t, test.want, got)
 		})
+	}
+}
+
+func BenchmarkLocale_Translate(b *testing.B) {
+	l, err := NewStore().AddLocale(
+		"en-US",
+		"English",
+		sampleSource,
+	)
+	assert.Nil(b, err)
+
+	for i := 0; i < b.N; i++ {
+		l.Translate("messages::test4")
+	}
+}
+
+func BenchmarkLocale_Translate_Format(b *testing.B) {
+	l, err := NewStore().AddLocale(
+		"en-US",
+		"English",
+		sampleSource,
+	)
+	assert.Nil(b, err)
+
+	for i := 0; i < b.N; i++ {
+		l.Translate("messages::test5", "Joe")
+	}
+}
+
+func BenchmarkLocale_Translate_Plural(b *testing.B) {
+	l, err := NewStore().AddLocale(
+		"en-US",
+		"English",
+		sampleSource,
+	)
+	assert.Nil(b, err)
+
+	for i := 0; i < b.N; i++ {
+		l.Translate("messages::test6", 1)
 	}
 }

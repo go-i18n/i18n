@@ -1,0 +1,12 @@
+version: '3'
+
+tasks:
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... -cover
+
+  bench:
+    desc: Run benchmarks
+    cmds:
+      - go test -test.bench=. -test.benchmem
