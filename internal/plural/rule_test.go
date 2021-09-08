@@ -41,6 +41,11 @@ func runTests(t *testing.T, pluralRuleID string, tests []pluralFormTest) {
 
 func appendIntegerTests(tests []pluralFormTest, form Form, examples []string) []pluralFormTest {
 	for _, ex := range expandExamples(examples) {
+		if strings.Contains(ex, "c") {
+			tests = append(tests, pluralFormTest{ex, form})
+			continue
+		}
+
 		i, err := strconv.ParseInt(ex, 10, 64)
 		if err != nil {
 			panic(err)

@@ -1,4 +1,5 @@
 // Copyright 2014 Nick Snyder. All rights reserved.
+// Copyright 2021 Unknwon. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 
@@ -6,6 +7,7 @@ package plural
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -13,12 +15,14 @@ import (
 // Operands is a representation of CLDR Operands, see
 // http://unicode.org/reports/tr35/tr35-numbers.html#Operands.
 type Operands struct {
-	N float64 // The absolute value of the source number (integer and decimals)
-	I int64   // The integer digits of n
-	V int64   // The number of visible fraction digits in n, with trailing zeros
-	W int64   // The number of visible fraction digits in n, without trailing zeros
-	F int64   // The visible fractional digits in n, with trailing zeros
-	T int64   // The visible fractional digits in n, without trailing zeros
+	N float64 // The absolute value of the source number (integer and decimals).
+	I int64   // The integer digits of n.
+	V int64   // The number of visible fraction digits in n, with trailing zeros.
+	W int64   // The number of visible fraction digits in n, without trailing zeros.
+	F int64   // The visible fractional digits in n, with trailing zeros.
+	T int64   // The visible fractional digits in n, without trailing zeros.
+	C int64   // The compact decimal exponent value: exponent of the power of 10 used in compact decimal formatting.
+	E int64   // Currently, synonym for ‘c’. however, may be redefined in the future.
 }
 
 // NEqualsAny returns true if o represents an integer equal to any of the
@@ -83,18 +87,41 @@ func newOperandsInt64(i int64) *Operands {
 	if i < 0 {
 		i = -i
 	}
-	return &Operands{float64(i), i, 0, 0, 0, 0}
+	return &Operands{float64(i), i, 0, 0, 0, 0, 0, 0}
 }
 
 func newOperandsString(s string) (*Operands, error) {
 	if s[0] == '-' {
 		s = s[1:]
 	}
-	n, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return nil, err
+
+	var err error
+	var n float64
+	var c int64
+	if parts := strings.Split(s, "c"); len(parts) == 2 {
+		n, err = strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return nil, err
+		}
+		c, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return nil, err
+		}
+
+		n *= math.Pow10(int(c))
+		s = fmt.Sprintf("%f", n)
+	} else {
+		n, err = strconv.ParseFloat(s, 64)
+		if err != nil {
+			return nil, err
+		}
 	}
-	ops := &Operands{N: n}
+	ops := &Operands{
+		N: n,
+		C: c,
+		E: c,
+	}
+
 	parts := strings.SplitN(s, ".", 2)
 	ops.I, err = strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
