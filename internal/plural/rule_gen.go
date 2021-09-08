@@ -1,4 +1,5 @@
 // Copyright 2014 Nick Snyder. All rights reserved.
+// Copyright 2021 Unknwon. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 //
@@ -16,7 +17,7 @@ func DefaultRules() Rules {
 			return Other
 		},
 	})
-	addPluralRules(rules, []string{"am", "as", "bn", "fa", "gu", "hi", "kn", "pcm", "zu"}, &Rule{
+	addPluralRules(rules, []string{"am", "as", "bn", "doi", "fa", "gu", "hi", "kn", "pcm", "zu"}, &Rule{
 		PluralForms: newPluralFormSet(One, Other),
 		PluralFormFunc: func(ops *Operands) Form {
 			// i = 0 or n = 1
@@ -27,7 +28,7 @@ func DefaultRules() Rules {
 			return Other
 		},
 	})
-	addPluralRules(rules, []string{"ff", "fr", "hy", "kab"}, &Rule{
+	addPluralRules(rules, []string{"ff", "hy", "kab"}, &Rule{
 		PluralForms: newPluralFormSet(One, Other),
 		PluralFormFunc: func(ops *Operands) Form {
 			// i = 0,1
@@ -47,7 +48,7 @@ func DefaultRules() Rules {
 			return Other
 		},
 	})
-	addPluralRules(rules, []string{"ast", "ca", "de", "en", "et", "fi", "fy", "gl", "ia", "io", "it", "ji", "nl", "pt_PT", "sc", "scn", "sv", "sw", "ur", "yi"}, &Rule{
+	addPluralRules(rules, []string{"ast", "ca", "de", "en", "et", "fi", "fy", "gl", "ia", "io", "it", "ji", "lij", "nl", "pt_PT", "sc", "scn", "sv", "sw", "ur", "yi"}, &Rule{
 		PluralForms: newPluralFormSet(One, Other),
 		PluralFormFunc: func(ops *Operands) Form {
 			// i = 1 and v = 0
@@ -247,6 +248,21 @@ func DefaultRules() Rules {
 			if intEqualsAny(ops.V, 0) && intInRange(ops.I%10, 2, 4) && !intInRange(ops.I%100, 12, 14) ||
 				intInRange(ops.F%10, 2, 4) && !intInRange(ops.F%100, 12, 14) {
 				return Few
+			}
+			return Other
+		},
+	})
+	addPluralRules(rules, []string{"fr"}, &Rule{
+		PluralForms: newPluralFormSet(One, Many, Other),
+		PluralFormFunc: func(ops *Operands) Form {
+			// i = 0,1
+			if intEqualsAny(ops.I, 0, 1) {
+				return One
+			}
+			// e = 0 and i != 0 and i % 1000000 = 0 and v = 0 or e != 0..5
+			if intEqualsAny(ops.E, 0) && !intEqualsAny(ops.I, 0) && intEqualsAny(ops.I%1000000, 0) && intEqualsAny(ops.V, 0) ||
+				!intInRange(ops.E, 0, 5) {
+				return Many
 			}
 			return Other
 		},
