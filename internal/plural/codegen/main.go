@@ -31,7 +31,6 @@ func main() {
 	flag.StringVar(&in, "i", "plurals.xml", "the input XML file containing CLDR plural rules")
 	flag.StringVar(&cout, "cout", "", "the code output file")
 	flag.StringVar(&tout, "tout", "", "the test output file")
-	flag.BoolVar(&verbose, "v", false, "verbose output")
 	flag.Parse()
 
 	buf, err := ioutil.ReadFile(in)
@@ -139,15 +138,7 @@ func Test{{.Name}}(t *testing.T) {
 `))
 
 func infof(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-}
-
-var verbose bool
-
-func verbosef(format string, args ...interface{}) {
-	if verbose {
-		infof(format, args...)
-	}
+	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 func fatalf(format string, args ...interface{}) {
