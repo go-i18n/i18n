@@ -89,11 +89,13 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 	return l, nil
 }
 
+var ErrLocalNotFound = errors.New("locale not found")
+
 // Locale returns the locale with the given language name.
 func (s *Store) Locale(lang string) (*Locale, error) {
 	l, ok := s.locales[lang]
 	if !ok {
-		return nil, errors.Errorf("locale not found for %q", lang)
+		return nil, ErrLocalNotFound
 	}
 	return l, nil
 }
@@ -223,7 +225,8 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 				format = strings.NewReplacer(replaces...).Replace(format)
 			}
 
-			messages[s.Name()+"::"+k.Name()] = &Message{
+			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
+			messages[key] = &Message{
 				pluralRule:   rule,
 				format:       format,
 				placeholders: placeholders,

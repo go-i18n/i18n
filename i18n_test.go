@@ -42,7 +42,7 @@ func TestStore_Locale(t *testing.T) {
 	t.Run("non-existent locale", func(t *testing.T) {
 		_, err := s.Locale("zh-CN")
 		got := fmt.Sprintf("%v", err)
-		want := `locale not found for "zh-CN"`
+		want := "locale not found"
 		assert.Equal(t, want, got)
 	})
 }
