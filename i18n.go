@@ -14,7 +14,7 @@ import (
 	"golang.org/x/text/language"
 	"gopkg.in/ini.v1"
 
-	"github.com/go-i18n/i18n/internal/plural"
+	"unknwon.dev/i18n/internal/plural"
 )
 
 // Store contains a collection of locales and their descriptive names.

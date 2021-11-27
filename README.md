@@ -11,7 +11,7 @@ Package i18n provides internationalization and localization for your Go applicat
 
 The minimum requirement of Go is **1.16**.
 
-	go get github.com/go-i18n/i18n
+	go get unknwon.dev/i18n
 
 ## Getting started
 
@@ -44,7 +44,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/go-i18n/i18n"
+	"unknwon.dev/i18n"
 )
 
 func main() {
