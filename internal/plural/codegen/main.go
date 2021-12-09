@@ -1,5 +1,5 @@
 // Copyright 2014 Nick Snyder. All rights reserved.
-// Copyright 2021 Unknwon. All rights reserved.
+// Copyright 2021 Joe Chen. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 
@@ -82,7 +82,7 @@ func openWritableFile(name string) *os.File {
 
 var codeTemplate = template.Must(template.New("rule").Parse(`
 // Copyright 2014 Nick Snyder. All rights reserved.
-// Copyright 2021 Unknwon. All rights reserved.
+// Copyright 2021 Joe Chen. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 //
@@ -112,7 +112,7 @@ func DefaultRules() Rules {
 
 var testTemplate = template.Must(template.New("rule").Parse(`
 // Copyright 2014 Nick Snyder. All rights reserved.
-// Copyright 2021 Unknwon. All rights reserved.
+// Copyright 2021 Joe Chen. All rights reserved.
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 //
