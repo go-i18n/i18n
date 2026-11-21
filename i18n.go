@@ -12,7 +12,7 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/text/language"
-	"gopkg.in/ini.v1"
+	"unknwon.dev/ini/v2"
 
 	"unknwon.dev/i18n/internal/plural"
 )
@@ -73,7 +73,7 @@ func (s *Store) add(l *Locale) bool {
 // AddLocale adds a locale with given language name and description that is
 // loaded from the list of sources. Please refer to INI documentation regarding
 // what is considered as a valid data source:
-// https://ini.unknwon.io/docs/howto/load_data_sources.
+// https://pkg.go.dev/unknwon.dev/ini/v2#LoadSources.
 func (s *Store) AddLocale(lang, desc string, source interface{}, others ...interface{}) (*Locale, error) {
 	tag, err := language.Parse(lang)
 	if err != nil {
@@ -81,17 +81,14 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 	}
 
 	file, err := ini.LoadSources(
-		ini.LoadOptions{
-			IgnoreInlineComment:         true,
-			UnescapeValueCommentSymbols: true,
-		},
-		source,
-		others...,
+		append([]interface{}{source}, others...),
+		ini.IgnoreInlineComment(true),
+		ini.UnescapeValueCommentSymbols(true),
+		ini.Locking(false), // The file is only read.
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "load sources")
 	}
-	file.BlockMode = false // We only read from the file
 
 	rule := s.rules[tag]
 	if rule == nil {
