@@ -130,6 +130,17 @@ type Message struct {
 	// namedPlurals is keyed by the content of the placeholder within the format,
 	// e.g. "file:count" for "${file:count}" that was parsed from "${file, count}".
 	namedPlurals map[string]*pluralPlaceholder
+	// namedParts is the format split for translating with Args, nil when the
+	// format has no placeholder to fill.
+	namedParts []namedPart
+}
+
+// namedPart is a literal text of a message followed by either a named argument
+// or a named plural to fill in.
+type namedPart struct {
+	text   string
+	name   string // e.g. "path" for "{path}"
+	plural *pluralPlaceholder
 }
 
 // Translate translates the message with the supplied list of arguments. When
@@ -187,60 +198,90 @@ func isPlaceholderName(name string) bool {
 	return true
 }
 
-// translateArgs translates the message with named arguments in a single pass,
-// so that a value containing a placeholder is never substituted again.
-func (m *Message) translateArgs(args Args) string {
-	format := m.format
-	if strings.IndexByte(format, '{') < 0 {
-		return format
-	}
-
-	var b strings.Builder
-	b.Grow(len(format))
+// parseNamedParts splits the format into parts for translating with Args, in
+// a single pass so that a value containing a placeholder is never substituted
+// again.
+func parseNamedParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) []namedPart {
+	var parts []namedPart
+	var text strings.Builder
+	rest := format
 	for {
-		open := strings.IndexByte(format, '{')
+		open := strings.IndexByte(rest, '{')
 		if open < 0 {
 			break
 		}
-		n := strings.IndexByte(format[open+1:], '}')
+		n := strings.IndexByte(rest[open+1:], '}')
 		if n < 0 {
 			break
 		}
 		end := open + 1 + n
-		name := format[open+1 : end]
+		name := rest[open+1 : end]
 
-		if open > 0 && format[open-1] == '$' {
-			if placeholder, ok := m.namedPlurals[name]; ok {
-				b.WriteString(format[:open-1])
-				count, ok := args[placeholder.arg]
-				if ok {
-					b.WriteString(placeholder.form(m.pluralRule, count))
-				} else {
-					b.WriteString("<no arg for name " + placeholder.arg + ">")
-				}
-				format = format[end+1:]
+		if open > 0 && rest[open-1] == '$' {
+			if placeholder, ok := namedPlurals[name]; ok {
+				text.WriteString(rest[:open-1])
+				parts = append(parts, namedPart{text: text.String(), plural: placeholder})
+				text.Reset()
+				rest = rest[end+1:]
 				continue
 			}
 
 			index, err := strconv.Atoi(name)
-			if _, ok := m.placeholders[index]; err == nil && ok {
-				b.WriteString(format[:open-1])
-				b.WriteString("<no arg for index " + strconv.Itoa(index) + ">")
-				format = format[end+1:]
+			if _, ok := placeholders[index]; err == nil && ok {
+				text.WriteString(rest[:open-1])
+				text.WriteString("<no arg for index " + strconv.Itoa(index) + ">")
+				rest = rest[end+1:]
 				continue
 			}
 		}
 
 		if !isPlaceholderName(name) {
 			// The brace may still open a placeholder, e.g. "{{name}".
-			b.WriteString(format[:open+1])
-			format = format[open+1:]
+			text.WriteString(rest[:open+1])
+			rest = rest[open+1:]
 			continue
 		}
 
-		value, ok := args[name]
-		if ok {
-			b.WriteString(format[:open])
+		text.WriteString(rest[:open])
+		parts = append(parts, namedPart{text: text.String(), name: name})
+		text.Reset()
+		rest = rest[end+1:]
+	}
+	if parts == nil && text.Len() == 0 {
+		return nil
+	}
+	text.WriteString(rest)
+	return append(parts, namedPart{text: text.String()})
+}
+
+// translateArgs translates the message with named arguments.
+func (m *Message) translateArgs(args Args) string {
+	if m.namedParts == nil {
+		return m.format
+	}
+
+	var b strings.Builder
+	b.Grow(len(m.format))
+	for _, p := range m.namedParts {
+		b.WriteString(p.text)
+		switch {
+		case p.plural != nil:
+			count, ok := args[p.plural.arg]
+			if ok {
+				b.WriteString(p.plural.form(m.pluralRule, count))
+			} else {
+				b.WriteString("<no arg for name ")
+				b.WriteString(p.plural.arg)
+				b.WriteByte('>')
+			}
+		case p.name != "":
+			value, ok := args[p.name]
+			if !ok {
+				b.WriteByte('{')
+				b.WriteString(p.name)
+				b.WriteByte('}')
+				continue
+			}
 			// Common types skip fmt, which also keeps b on the stack.
 			switch v := value.(type) {
 			case string:
@@ -252,12 +293,8 @@ func (m *Message) translateArgs(args Args) string {
 			default:
 				b.WriteString(fmt.Sprint(v)) //nolint:staticcheck // fmt.Fprint(&b, ...) would move b to the heap.
 			}
-		} else {
-			b.WriteString(format[:end+1])
 		}
-		format = format[end+1:]
 	}
-	b.WriteString(format)
 	return b.String()
 }
 
@@ -367,6 +404,7 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 				format:       format,
 				placeholders: placeholders,
 				namedPlurals: namedPlurals,
+				namedParts:   parseNamedParts(format, placeholders, namedPlurals),
 			}
 		}
 	}
