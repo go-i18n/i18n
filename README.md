@@ -90,19 +90,6 @@ fmt.Println(l1.Translate("messages::test4", i18n.Args{"user": "Joe", "count": 2}
 // => "Joe changed 2 files"
 ```
 
-### Key separator
-
-A message key is the section name and the key name joined by `::` by default, e.g. `messages::test1`. Keys in the default section (i.e. above any section) are looked up by the key name alone. Use `i18n.NewStoreWithOptions` to change the separator:
-
-```go
-s := i18n.NewStoreWithOptions(i18n.StoreOptions{KeySeparator: "."})
-l, err := s.AddLocale("en-US", "English", "locale_en-US.ini")
-// ... handler error
-
-fmt.Println(l.Translate("messages.test1", 1, 2))
-// => "This patch has 1 changed file and deleted 2 files"
-```
-
 ## License
 
 This project is under the MIT License. See the [LICENSE](LICENSE) file for the full license text.

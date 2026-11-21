@@ -169,32 +169,6 @@ test1 = 我变更了 %[1]d 个${file, 1}并删除了 %[2]d 个${file, 2}
 	}
 }
 
-func TestNewStoreWithOptions(t *testing.T) {
-	source := []byte(`
-sign_in = Sign in
-
-[repo]
-editor.add = Add '{path}'
-`)
-
-	t.Run("default key separator", func(t *testing.T) {
-		l, err := NewStoreWithOptions(StoreOptions{}).AddLocale("en-US", "English", source)
-		assert.Nil(t, err)
-		assert.Equal(t, "Sign in", l.Translate("sign_in"))
-		assert.Equal(t, "Add '{path}'", l.Translate("repo::editor.add"))
-		assert.Equal(t, "<no such key: repo.editor.add>", l.Translate("repo.editor.add"))
-	})
-
-	t.Run("custom key separator", func(t *testing.T) {
-		l, err := NewStoreWithOptions(StoreOptions{KeySeparator: "."}).AddLocale("en-US", "English", source)
-		assert.Nil(t, err)
-		assert.Equal(t, "Sign in", l.Translate("sign_in"))
-		assert.Equal(t, "Add 'README.md'", l.Translate("repo.editor.add", Args{"path": "README.md"}))
-		assert.Equal(t, "<no such key: repo::editor.add>", l.Translate("repo::editor.add"))
-		assert.Equal(t, "<no such key: DEFAULT.sign_in>", l.Translate("DEFAULT.sign_in"))
-	})
-}
-
 var namedSource = []byte(`
 greeting = Hello, {name}!
 
@@ -215,7 +189,7 @@ positional = My name is %s
 `)
 
 func TestLocale_Translate_Args(t *testing.T) {
-	l, err := NewStoreWithOptions(StoreOptions{KeySeparator: "."}).AddLocale("en-US", "English", namedSource)
+	l, err := NewStore().AddLocale("en-US", "English", namedSource)
 	assert.Nil(t, err)
 
 	tests := []struct {
@@ -232,85 +206,85 @@ func TestLocale_Translate_Args(t *testing.T) {
 		},
 		{
 			name: "multiple placeholders",
-			key:  "messages.add",
+			key:  "messages::add",
 			args: Args{"path": "README.md", "repo": "gogs"},
 			want: `Add 'README.md' to gogs`,
 		},
 		{
 			name: "same placeholder twice",
-			key:  "messages.twice",
+			key:  "messages::twice",
 			args: Args{"name": "Joe"},
 			want: `Joe and Joe again`,
 		},
 		{
 			name: "camel case and digits",
-			key:  "messages.camel",
+			key:  "messages::camel",
 			args: Args{"externalURL": "https://gogs.io", "p50": 12, "old_name": "x"},
 			want: `Visit https://gogs.io at 12 for x`,
 		},
 		{
 			name: "placeholder without value left unchanged",
-			key:  "messages.time",
+			key:  "messages::time",
 			args: Args{"user": "Joe"},
 			want: `Updated {time} by Joe`,
 		},
 		{
 			name: "no fmt.Sprintf for percent signs",
-			key:  "messages.percent",
+			key:  "messages::percent",
 			args: Args{"user": "Joe"},
 			want: `Search with uid=%s for Joe, 100% done`,
 		},
 		{
 			name: "value containing a placeholder is not substituted again",
-			key:  "messages.add",
+			key:  "messages::add",
 			args: Args{"path": "{repo}", "repo": "gogs"},
 			want: `Add '{repo}' to gogs`,
 		},
 		{
 			name: "braces that are not placeholders",
-			key:  "messages.braces",
+			key:  "messages::braces",
 			args: Args{"maxFilesize": "3 MB", "not a name": "x", "": "y", "unclosed": "z"},
 			want: `Size {3 MB and {not a name} and {} and {unclosed`,
 		},
 		{
 			name: "empty args",
-			key:  "messages.time",
+			key:  "messages::time",
 			args: Args{},
 			want: `Updated {time} by {user}`,
 		},
 		{
 			name: "named plural one",
-			key:  "messages.plural",
+			key:  "messages::plural",
 			args: Args{"count": 1},
 			want: `Changed 1 file`,
 		},
 		{
 			name: "named plural other",
-			key:  "messages.plural",
+			key:  "messages::plural",
 			args: Args{"count": 3},
 			want: `Changed 3 files`,
 		},
 		{
 			name: "named plural without value",
-			key:  "messages.plural",
+			key:  "messages::plural",
 			args: Args{},
 			want: `Changed {count} <no arg for name count>`,
 		},
 		{
 			name: "named plural with bad value",
-			key:  "messages.plural",
+			key:  "messages::plural",
 			args: Args{"count": "many"},
 			want: `Changed many <strconv.ParseFloat: parsing "many": invalid syntax>`,
 		},
 		{
 			name: "positional verbs are kept",
-			key:  "messages.positional",
+			key:  "messages::positional",
 			args: Args{"name": "Joe"},
 			want: `My name is %s`,
 		},
 		{
 			name: "positional plural without positional args",
-			key:  "messages.both",
+			key:  "messages::both",
 			args: Args{},
 			want: `Changed %[1]d <no arg for index 1>`,
 		},
@@ -323,18 +297,18 @@ func TestLocale_Translate_Args(t *testing.T) {
 	}
 
 	t.Run("args is not sole argument", func(t *testing.T) {
-		got := l.Translate("messages.positional", "Joe", Args{"name": "x"})
+		got := l.Translate("messages::positional", "Joe", Args{"name": "x"})
 		assert.Equal(t, "My name is Joe%!(EXTRA i18n.Args=map[name:x])", got)
 	})
 
 	t.Run("named plural with positional args", func(t *testing.T) {
-		got := l.Translate("messages.plural", 1)
+		got := l.Translate("messages::plural", 1)
 		assert.Equal(t, "Changed {count} <no arg for name count>%!(EXTRA int=1)", got)
 	})
 }
 
 func TestLocale_TranslateWithFallback_Args(t *testing.T) {
-	s := NewStoreWithOptions(StoreOptions{KeySeparator: "."})
+	s := NewStore()
 	l1, err := s.AddLocale("en-US", "English", namedSource)
 	assert.Nil(t, err)
 
@@ -364,19 +338,19 @@ time = {user} 更新于 {time}
 	}{
 		{
 			name: "good",
-			key:  "messages.add",
+			key:  "messages::add",
 			args: Args{"path": "README.md", "repo": "gogs"},
 			want: `将 'README.md' 添加到 gogs`,
 		},
 		{
 			name: "named plural",
-			key:  "messages.plural",
+			key:  "messages::plural",
 			args: Args{"count": 1},
 			want: `变更了 1 个文件`,
 		},
 		{
 			name: "from other source",
-			key:  "messages.time",
+			key:  "messages::time",
 			args: Args{"user": "Joe"},
 			want: `Joe 更新于 {time}`,
 		},
@@ -388,15 +362,15 @@ time = {user} 更新于 {time}
 		},
 		{
 			name: "fallback with percent signs",
-			key:  "messages.percent",
+			key:  "messages::percent",
 			args: Args{"user": "Joe"},
 			want: `Search with uid=%s for Joe, 100% done`,
 		},
 		{
 			name: "no such key",
-			key:  "messages.404",
+			key:  "messages::404",
 			args: Args{"user": "Joe"},
-			want: `<no such key: messages.404>`,
+			want: `<no such key: messages::404>`,
 		},
 	}
 	for _, test := range tests {

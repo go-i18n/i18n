@@ -17,41 +17,19 @@ import (
 	"unknwon.dev/i18n/internal/plural"
 )
 
-// DefaultKeySeparator is the default separator between the section name and
-// the key name of a message key, e.g. "messages::test1".
-const DefaultKeySeparator = "::"
-
-// StoreOptions contains options to customize a Store.
-type StoreOptions struct {
-	// KeySeparator is the separator between the section name and the key name of
-	// a message key, e.g. "." makes the key "test1" in the section "messages" to
-	// be looked up as "messages.test1". Default is DefaultKeySeparator.
-	KeySeparator string
-}
-
 // Store contains a collection of locales and their descriptive names.
 type Store struct {
-	langs        []string
-	descs        []string
-	locales      map[string]*Locale
-	rules        plural.Rules
-	keySeparator string
+	langs   []string
+	descs   []string
+	locales map[string]*Locale
+	rules   plural.Rules
 }
 
-// NewStore initializes and returns a new Store with default options.
+// NewStore initializes and returns a new Store.
 func NewStore() *Store {
-	return NewStoreWithOptions(StoreOptions{})
-}
-
-// NewStoreWithOptions initializes and returns a new Store with given options.
-func NewStoreWithOptions(opts StoreOptions) *Store {
-	if opts.KeySeparator == "" {
-		opts.KeySeparator = DefaultKeySeparator
-	}
 	return &Store{
-		locales:      make(map[string]*Locale),
-		rules:        plural.DefaultRules(),
-		keySeparator: opts.KeySeparator,
+		locales: make(map[string]*Locale),
+		rules:   plural.DefaultRules(),
 	}
 }
 
@@ -98,7 +76,7 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 		}
 	}
 
-	l, err := newLocale(tag, desc, rule, file, s.keySeparator)
+	l, err := newLocale(tag, desc, rule, file)
 	if err != nil {
 		return nil, errors.Wrap(err, "new locale")
 	}
@@ -279,10 +257,9 @@ type Locale struct {
 // e.g. ${file, 1} => ["file", "1"], ${file, count} => ["file", "count"]
 var placeholderRe = regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+|[a-zA-Z_][a-zA-Z0-9_]*)}`)
 
-// newLocale creates a new Locale with given language tag, description, the raw
-// locale file and the separator between section and key names. The "[plurals]"
-// section is reserved to define all plurals.
-func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File, keySeparator string) (*Locale, error) {
+// newLocale creates a new Locale with given language tag, description and the
+// raw locale file. The "[plurals]" section is reserved to define all plurals.
+func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File) (*Locale, error) {
 	const pluralsSection = "plurals"
 	s := file.Section(pluralsSection)
 	keys := s.Keys()
@@ -369,10 +346,7 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File,
 				format = strings.NewReplacer(replaces...).Replace(format)
 			}
 
-			key := k.Name()
-			if s.Name() != ini.DefaultSection {
-				key = s.Name() + keySeparator + key
-			}
+			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
 			messages[key] = &Message{
 				pluralRule:   rule,
 				format:       format,
