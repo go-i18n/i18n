@@ -17,19 +17,41 @@ import (
 	"unknwon.dev/i18n/internal/plural"
 )
 
-// Store contains a collection of locales and their descriptive names.
-type Store struct {
-	langs   []string
-	descs   []string
-	locales map[string]*Locale
-	rules   plural.Rules
+// DefaultKeySeparator is the default separator between the section name and
+// the key name of a message key, e.g. "messages::test1".
+const DefaultKeySeparator = "::"
+
+// StoreOptions contains options to customize a Store.
+type StoreOptions struct {
+	// KeySeparator is the separator between the section name and the key name of
+	// a message key, e.g. "." makes the key "test1" in the section "messages" to
+	// be looked up as "messages.test1". Default is DefaultKeySeparator.
+	KeySeparator string
 }
 
-// NewStore initializes and returns a new Store.
+// Store contains a collection of locales and their descriptive names.
+type Store struct {
+	langs        []string
+	descs        []string
+	locales      map[string]*Locale
+	rules        plural.Rules
+	keySeparator string
+}
+
+// NewStore initializes and returns a new Store with default options.
 func NewStore() *Store {
+	return NewStoreWithOptions(StoreOptions{})
+}
+
+// NewStoreWithOptions initializes and returns a new Store with given options.
+func NewStoreWithOptions(opts StoreOptions) *Store {
+	if opts.KeySeparator == "" {
+		opts.KeySeparator = DefaultKeySeparator
+	}
 	return &Store{
-		locales: make(map[string]*Locale),
-		rules:   plural.DefaultRules(),
+		locales:      make(map[string]*Locale),
+		rules:        plural.DefaultRules(),
+		keySeparator: opts.KeySeparator,
 	}
 }
 
@@ -79,7 +101,7 @@ func (s *Store) AddLocale(lang, desc string, source interface{}, others ...inter
 		}
 	}
 
-	l, err := newLocale(tag, desc, rule, file)
+	l, err := newLocale(tag, desc, rule, file, s.keySeparator)
 	if err != nil {
 		return nil, errors.Wrap(err, "new locale")
 	}
@@ -102,22 +124,53 @@ func (s *Store) Locale(lang string) (*Locale, error) {
 
 type pluralPlaceholder struct {
 	name  string
+	arg   string // The name of the argument for a named plural, e.g. "count" in "${file, count}".
 	forms map[plural.Form]string
 }
+
+// form returns the plural form that matches the given count.
+func (p *pluralPlaceholder) form(rule *plural.Rule, count interface{}) string {
+	ops, err := plural.NewOperands(count)
+	if err != nil {
+		return fmt.Sprintf("<%v>", err)
+	}
+
+	form := plural.Other
+	if rule != nil {
+		form = rule.PluralFormFunc(ops)
+	}
+	return p.forms[form]
+}
+
+// Args contains named arguments to fill "{name}" placeholders of a message.
+// It takes effect only when passed as the sole argument for translating, e.g.
+// l.Translate("messages::test1", i18n.Args{"name": "Joe"}).
+type Args map[string]interface{}
 
 // Message represents a message in a locale.
 type Message struct {
 	pluralRule   *plural.Rule
 	format       string
 	placeholders map[int]*pluralPlaceholder
+	// namedPlurals is keyed by the content of the placeholder within the format,
+	// e.g. "file:count" for "${file:count}" that was parsed from "${file, count}".
+	namedPlurals map[string]*pluralPlaceholder
 }
 
-// Translate translates the message with the supplied list of arguments.
+// Translate translates the message with the supplied list of arguments. When
+// the sole argument is Args, each "{name}" placeholder is replaced by the value
+// of the argument with the same name, and the message is not formatted by
+// fmt.Sprintf. A placeholder without a matching argument is left unchanged.
 func (m *Message) Translate(args ...interface{}) string {
 	if len(args) == 0 {
 		return m.format
 	}
-	if len(m.placeholders) == 0 {
+	if len(args) == 1 {
+		if named, ok := args[0].(Args); ok {
+			return m.translateArgs(named)
+		}
+	}
+	if len(m.placeholders) == 0 && len(m.namedPlurals) == 0 {
 		return fmt.Sprintf(m.format, args...)
 	}
 
@@ -134,19 +187,87 @@ func (m *Message) Translate(args ...interface{}) string {
 			continue
 		}
 
-		ops, err := plural.NewOperands(args[index-1])
-		if err != nil {
-			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<%v>", err), 1)
+		format = strings.Replace(format, placeholder.name, placeholder.form(m.pluralRule, args[index-1]), 1)
+	}
+	for _, placeholder := range m.namedPlurals {
+		format = strings.Replace(format, placeholder.name, fmt.Sprintf("<no arg for name %s>", placeholder.arg), -1)
+	}
+	return fmt.Sprintf(format, args...)
+}
+
+// isPlaceholderName returns true if the name only consists of ASCII letters,
+// digits and underscores.
+func isPlaceholderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// translateArgs translates the message with named arguments in a single pass,
+// so that a value containing a placeholder is never substituted again.
+func (m *Message) translateArgs(args Args) string {
+	format := m.format
+	var b strings.Builder
+	b.Grow(len(format))
+	for {
+		open := strings.IndexByte(format, '{')
+		if open < 0 {
+			break
+		}
+		n := strings.IndexByte(format[open+1:], '}')
+		if n < 0 {
+			break
+		}
+		end := open + 1 + n
+		name := format[open+1 : end]
+
+		if open > 0 && format[open-1] == '$' {
+			if placeholder, ok := m.namedPlurals[name]; ok {
+				b.WriteString(format[:open-1])
+				count, ok := args[placeholder.arg]
+				if ok {
+					b.WriteString(placeholder.form(m.pluralRule, count))
+				} else {
+					b.WriteString("<no arg for name " + placeholder.arg + ">")
+				}
+				format = format[end+1:]
+				continue
+			}
+
+			index, err := strconv.Atoi(name)
+			if _, ok := m.placeholders[index]; err == nil && ok {
+				b.WriteString(format[:open-1])
+				b.WriteString(fmt.Sprintf("<no arg for index %d>", index))
+				format = format[end+1:]
+				continue
+			}
+		}
+
+		if !isPlaceholderName(name) {
+			// The brace may still open a placeholder, e.g. "{{name}".
+			b.WriteString(format[:open+1])
+			format = format[open+1:]
 			continue
 		}
 
-		form := plural.Other
-		if m.pluralRule != nil {
-			form = m.pluralRule.PluralFormFunc(ops)
+		value, ok := args[name]
+		if ok {
+			b.WriteString(format[:open])
+			b.WriteString(fmt.Sprint(value))
+		} else {
+			b.WriteString(format[:end+1])
 		}
-		format = strings.Replace(format, placeholder.name, placeholder.forms[form], 1)
+		format = format[end+1:]
 	}
-	return fmt.Sprintf(format, args...)
+	b.WriteString(format)
+	return b.String()
 }
 
 // Locale represents a locale with target language and a collection of messages.
@@ -156,11 +277,13 @@ type Locale struct {
 	messages map[string]*Message
 }
 
-var placeholderRe = regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+)}`) // e.g. ${file, 1} => ["file", "1"]
+// e.g. ${file, 1} => ["file", "1"], ${file, count} => ["file", "count"]
+var placeholderRe = regexp.MustCompile(`\${([a-zA-z]+),\s*(\d+|[a-zA-Z_][a-zA-Z0-9_]*)}`)
 
-// newLocale creates a new Locale with given language tag, description and the
-// raw locale file. The "[plurals]" section is reserved to define all plurals.
-func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File) (*Locale, error) {
+// newLocale creates a new Locale with given language tag, description, the raw
+// locale file and the separator between section and key names. The "[plurals]"
+// section is reserved to define all plurals.
+func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File, keySeparator string) (*Locale, error) {
 	const pluralsSection = "plurals"
 	s := file.Section(pluralsSection)
 	keys := s.Keys()
@@ -195,6 +318,7 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 			// NOTE: Majority of messages do not need to deal with plurals, thus it makes
 			//  sense to leave them with a nil map to save some memory space.
 			var placeholders map[int]*pluralPlaceholder
+			var namedPlurals map[string]*pluralPlaceholder
 
 			format := k.String()
 			if strings.Contains(format, "${") {
@@ -204,12 +328,33 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 				for _, submatch := range matches {
 					placeholder := submatch[0]
 					noun := submatch[1]
-					index, _ := strconv.Atoi(submatch[2])
+					forms, ok := pluralForms[noun]
+
+					index, err := strconv.Atoi(submatch[2])
+					if err != nil {
+						if !ok {
+							replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
+							continue
+						}
+
+						arg := submatch[2]
+						key := noun + ":" + arg
+						name := "${" + key + "}"
+						replaces = append(replaces, placeholder, name)
+						if namedPlurals == nil {
+							namedPlurals = make(map[string]*pluralPlaceholder)
+						}
+						namedPlurals[key] = &pluralPlaceholder{
+							name:  name,
+							arg:   arg,
+							forms: forms,
+						}
+						continue
+					}
 					if index < 1 {
 						return nil, errors.Errorf("the smallest index is 1 but got %d for %q", index, placeholder)
 					}
 
-					forms, ok := pluralForms[noun]
 					if !ok {
 						replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
 						continue
@@ -225,11 +370,15 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 				format = strings.NewReplacer(replaces...).Replace(format)
 			}
 
-			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
+			key := k.Name()
+			if s.Name() != ini.DefaultSection {
+				key = s.Name() + keySeparator + key
+			}
 			messages[key] = &Message{
 				pluralRule:   rule,
 				format:       format,
 				placeholders: placeholders,
+				namedPlurals: namedPlurals,
 			}
 		}
 	}
@@ -251,7 +400,8 @@ func (l *Locale) Description() string {
 	return l.desc
 }
 
-// Translate uses the locale to translate the message of the given key.
+// Translate uses the locale to translate the message of the given key. Pass
+// Args as the sole argument to fill named placeholders, see Message.Translate.
 func (l *Locale) Translate(key string, args ...interface{}) string {
 	return l.TranslateWithFallback(nil, key, args...)
 }
