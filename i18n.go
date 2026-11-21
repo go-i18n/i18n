@@ -191,6 +191,10 @@ func isPlaceholderName(name string) bool {
 // so that a value containing a placeholder is never substituted again.
 func (m *Message) translateArgs(args Args) string {
 	format := m.format
+	if strings.IndexByte(format, '{') < 0 {
+		return format
+	}
+
 	var b strings.Builder
 	b.Grow(len(format))
 	for {
@@ -221,7 +225,7 @@ func (m *Message) translateArgs(args Args) string {
 			index, err := strconv.Atoi(name)
 			if _, ok := m.placeholders[index]; err == nil && ok {
 				b.WriteString(format[:open-1])
-				fmt.Fprintf(&b, "<no arg for index %d>", index)
+				b.WriteString("<no arg for index " + strconv.Itoa(index) + ">")
 				format = format[end+1:]
 				continue
 			}
@@ -237,7 +241,17 @@ func (m *Message) translateArgs(args Args) string {
 		value, ok := args[name]
 		if ok {
 			b.WriteString(format[:open])
-			fmt.Fprint(&b, value)
+			// Common types skip fmt, which also keeps b on the stack.
+			switch v := value.(type) {
+			case string:
+				b.WriteString(v)
+			case int:
+				b.WriteString(strconv.Itoa(v))
+			case int64:
+				b.WriteString(strconv.FormatInt(v, 10))
+			default:
+				b.WriteString(fmt.Sprint(v)) //nolint:staticcheck // fmt.Fprint(&b, ...) would move b to the heap.
+			}
 		} else {
 			b.WriteString(format[:end+1])
 		}
