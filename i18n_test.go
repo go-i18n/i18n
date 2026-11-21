@@ -2,6 +2,7 @@ package i18n
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,7 @@ test3 = I have %[1]d ${dog, 10}
 test4 = I have a dream
 test5 = My name is %s
 test6 = I have %[1]d ${dog, 1}
+test7 = I have %[1]d ${dog, 99999999999999999999}
 `)
 
 func TestLocale_Translate(t *testing.T) {
@@ -98,6 +100,12 @@ func TestLocale_Translate(t *testing.T) {
 			key:  "messages::test3",
 			args: []interface{}{1},
 			want: `I have 1 <no arg for index 10>`,
+		},
+		{
+			name: "index out of range",
+			key:  "messages::test7",
+			args: []interface{}{1},
+			want: fmt.Sprintf("I have 1 <no arg for index %d>", math.MaxInt),
 		},
 		{
 			name: "no plural",

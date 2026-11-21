@@ -320,14 +320,13 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 					noun := submatch[1]
 					forms, ok := pluralForms[noun]
 
-					index, err := strconv.Atoi(submatch[2])
-					if err != nil {
+					arg := submatch[2]
+					if c := arg[0]; c < '0' || c > '9' {
 						if !ok {
 							replaces = append(replaces, placeholder, fmt.Sprintf("<no such plural: %s>", noun))
 							continue
 						}
 
-						arg := submatch[2]
 						key := noun + ":" + arg
 						name := "${" + key + "}"
 						replaces = append(replaces, placeholder, name)
@@ -341,6 +340,8 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 						}
 						continue
 					}
+
+					index, _ := strconv.Atoi(arg) // An index out of range is clamped and reported as missing.
 					if index < 1 {
 						return nil, errors.Errorf("the smallest index is 1 but got %d for %q", index, placeholder)
 					}
