@@ -25,8 +25,8 @@ type PluralGroup struct {
 
 // Name returns a unique name for this plural group.
 func (pg *PluralGroup) Name() string {
-	n := strings.Title(pg.Locales)
-	return strings.Replace(n, " ", "", -1)
+	n := strings.Title(pg.Locales) //nolint:staticcheck // CLDR names are ASCII.
+	return strings.ReplaceAll(n, " ", "")
 }
 
 // SplitLocales returns all the locales in the PluralGroup as a slice.
@@ -42,7 +42,7 @@ type PluralRule struct {
 
 // CountTitle returns the title case of the PluralRule's count.
 func (pr *PluralRule) CountTitle() string {
-	return strings.Title(pr.Count)
+	return strings.Title(pr.Count) //nolint:staticcheck // CLDR names are ASCII.
 }
 
 // Condition returns the condition where the PluralRule applies.
@@ -53,7 +53,7 @@ func (pr *PluralRule) Condition() string {
 
 // Examples returns the integer and decimal exmaples for the PLuralRule.
 func (pr *PluralRule) Examples() (integer []string, decimal []string) {
-	ex := strings.Replace(pr.Rule, ", …", "", -1)
+	ex := strings.ReplaceAll(pr.Rule, ", …", "")
 	ddelim := "@decimal"
 	if i := strings.Index(ex, ddelim); i > 0 {
 		dex := strings.TrimSpace(ex[i+len(ddelim):])
@@ -92,7 +92,7 @@ func (pr *PluralRule) GoCondition() string {
 			if parts == nil {
 				continue
 			}
-			lvar, lmod, op, rhs := strings.Title(parts[1]), parts[2], parts[3], strings.TrimSpace(parts[4])
+			lvar, lmod, op, rhs := strings.Title(parts[1]), parts[2], parts[3], strings.TrimSpace(parts[4]) //nolint:staticcheck // CLDR names are ASCII.
 			if op == "=" {
 				op = "=="
 			}

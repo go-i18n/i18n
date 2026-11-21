@@ -190,7 +190,7 @@ func (m *Message) Translate(args ...interface{}) string {
 		format = strings.Replace(format, placeholder.name, placeholder.form(m.pluralRule, args[index-1]), 1)
 	}
 	for _, placeholder := range m.namedPlurals {
-		format = strings.Replace(format, placeholder.name, fmt.Sprintf("<no arg for name %s>", placeholder.arg), -1)
+		format = strings.ReplaceAll(format, placeholder.name, fmt.Sprintf("<no arg for name %s>", placeholder.arg))
 	}
 	return fmt.Sprintf(format, args...)
 }
@@ -203,7 +203,9 @@ func isPlaceholderName(name string) bool {
 	}
 	for i := 0; i < len(name); i++ {
 		c := name[i]
-		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_') {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '_':
+		default:
 			return false
 		}
 	}
@@ -244,7 +246,7 @@ func (m *Message) translateArgs(args Args) string {
 			index, err := strconv.Atoi(name)
 			if _, ok := m.placeholders[index]; err == nil && ok {
 				b.WriteString(format[:open-1])
-				b.WriteString(fmt.Sprintf("<no arg for index %d>", index))
+				fmt.Fprintf(&b, "<no arg for index %d>", index)
 				format = format[end+1:]
 				continue
 			}
@@ -260,7 +262,7 @@ func (m *Message) translateArgs(args Args) string {
 		value, ok := args[name]
 		if ok {
 			b.WriteString(format[:open])
-			b.WriteString(fmt.Sprint(value))
+			fmt.Fprint(&b, value)
 		} else {
 			b.WriteString(format[:end+1])
 		}
