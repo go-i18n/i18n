@@ -632,18 +632,26 @@ func checkFormat(positionalFormat string, positionalParts []positionalPart) erro
 // directive has a width or precision that is too large or given by an argument
 // with "*".
 func countDirectives(format string) (n int, open bool, err error) {
-	// The format has no "]" after lastClose, which keeps skipping argument
-	// indexes linear.
-	lastClose := strings.LastIndexByte(format, ']')
+	// Only digits are accepted within an argument index, so that skipping it
+	// never skips a directive that fmt.Sprintf may still see, e.g. the one in
+	// "%[1][%9999d" where fmt takes the second "[" as the verb.
+	badIndex := false
 	skipArgIndex := func(i int) int {
 		if i >= len(format) || format[i] != '[' {
 			return i
 		}
-		if i > lastClose {
-			open = true // A later text may close it.
-			return i + 1
+		j := i + 1
+		for j < len(format) && '0' <= format[j] && format[j] <= '9' {
+			j++
 		}
-		return i + strings.IndexByte(format[i:], ']') + 1
+		if j == len(format) {
+			open = true // A later text may close it.
+			return j
+		}
+		if j == i+1 || format[j] != ']' {
+			badIndex = true
+		}
+		return j + 1
 	}
 
 	for i := 0; i < len(format); i++ {
@@ -679,6 +687,9 @@ func countDirectives(format string) (n int, open bool, err error) {
 			break
 		}
 		i = skipArgIndex(i)
+		if badIndex {
+			return 0, false, errors.New("format directive has an invalid argument index")
+		}
 		if i >= len(format) {
 			open = true
 		}

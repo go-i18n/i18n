@@ -81,6 +81,7 @@ func TestLocale_Translate_UnsafeFormat(t *testing.T) {
 		fromArgument  = "<format directive takes its width or precision from an argument>"
 		intoPlural    = "<format directive continues into a plural>"
 		openForm      = "<plural form ends within a format directive>"
+		badIndex      = "<format directive has an invalid argument index>"
 	)
 	tests := []struct {
 		name    string
@@ -97,6 +98,11 @@ func TestLocale_Translate_UnsafeFormat(t *testing.T) {
 		{name: "width from argument", message: "%[1]*[1]d", want: fromArgument},
 		{name: "too many directives", message: strings.Repeat("%[1]d", 1001), want: "<more than 1000 format directives>"},
 		{name: "large width in plural form", plurals: "f.other = %9999[1]d", message: "${f, 1}", want: tooManyDigits},
+		{name: "directive hidden after index", message: "%[5][%9999999[1]d", want: badIndex},
+		{name: "directive hidden after width", message: "%[1]5[%9999999d]", want: badIndex},
+		{name: "directive hidden after precision", message: "%.[1][%9999999[1]d", want: badIndex},
+		{name: "width from argument hidden", message: "%[0][%*d]x", want: badIndex},
+		{name: "directive hidden in plural form", plurals: "f.other = %[0][%9999999d]x", message: "${f, 1}", want: badIndex},
 		{name: "directive into plural", plurals: "f.other = 9999999[1]d", message: "%${f, 1}", want: intoPlural},
 		{name: "index into plural", plurals: "f.other = 1]9999999d", message: "%[${f, 1}", want: intoPlural},
 		{name: "directive out of plural", plurals: "f.other = %", message: "${f, 1}9999999d", want: openForm},
