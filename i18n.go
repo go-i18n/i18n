@@ -7,6 +7,7 @@ package i18n
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -124,12 +125,11 @@ type Args map[string]interface{}
 
 // Message represents a message in a locale.
 type Message struct {
-	pluralRule   *plural.Rule
-	format       string
-	placeholders map[int]*pluralPlaceholder
-	// namedPlurals is keyed by the content of the placeholder within the format,
-	// e.g. "file:count" for "${file:count}" that was parsed from "${file, count}".
-	namedPlurals map[string]*pluralPlaceholder
+	pluralRule *plural.Rule
+	format     string
+	// positionalParts is the format split for translating with positional
+	// arguments, nil when the format has no plural.
+	positionalParts []positionalPart
 	// namedParts is the format split for translating with Args, nil when the
 	// format has no placeholder to fill.
 	namedParts []namedPart
@@ -156,29 +156,72 @@ func (m *Message) Translate(args ...interface{}) string {
 			return m.translateArgs(named)
 		}
 	}
-	if len(m.placeholders) == 0 && len(m.namedPlurals) == 0 {
+	if m.positionalParts == nil {
 		return fmt.Sprintf(m.format, args...)
 	}
 
-	// NOTE: strings.NewReplacer makes >3x more allocations and 5x slower than strings.Replace.
-	//  For strings.NewReplacer:
-	//  	BenchmarkLocale_Translate_Plural-16    	  987433	      1097 ns/op	    2585 B/op	      10 allocs/op
-	//  For strings.Replace:
-	//  	BenchmarkLocale_Translate_Plural-16    	 4316941	       285.3 ns/op	      80 B/op	       3 allocs/op
-
-	format := m.format
-	for index, placeholder := range m.placeholders {
-		if len(args) < index {
-			format = strings.Replace(format, placeholder.name, fmt.Sprintf("<no arg for index %d>", index), 1)
-			continue
+	var b strings.Builder
+	b.Grow(len(m.format))
+	for _, p := range m.positionalParts {
+		b.WriteString(p.text)
+		switch {
+		case p.plural == nil:
+		case len(args) < p.index:
+			b.WriteString("<no arg for index ")
+			b.WriteString(strconv.Itoa(p.index))
+			b.WriteByte('>')
+		default:
+			b.WriteString(p.plural.form(m.pluralRule, args[p.index-1]))
 		}
+	}
+	return fmt.Sprintf(b.String(), args...)
+}
 
-		format = strings.Replace(format, placeholder.name, placeholder.form(m.pluralRule, args[index-1]), 1)
+// positionalPart is a literal text of a message followed by an optional plural
+// to fill in from the positional argument at index.
+type positionalPart struct {
+	text   string
+	index  int
+	plural *pluralPlaceholder
+}
+
+// parsePositionalParts splits the format into parts for translating with
+// positional arguments, nil when the format has no plural. Only the first
+// occurrence of each positional plural is filled, and named plurals are
+// reported as missing arguments.
+func parsePositionalParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) []positionalPart {
+	if len(placeholders) == 0 && len(namedPlurals) == 0 {
+		return nil
 	}
-	for _, placeholder := range m.namedPlurals {
-		format = strings.ReplaceAll(format, placeholder.name, fmt.Sprintf("<no arg for name %s>", placeholder.arg))
+
+	for _, placeholder := range namedPlurals {
+		format = strings.ReplaceAll(format, placeholder.name, "<no arg for name "+placeholder.arg+">")
 	}
-	return fmt.Sprintf(format, args...)
+
+	type occurrence struct {
+		pos   int
+		index int
+	}
+	occurrences := make([]occurrence, 0, len(placeholders))
+	for index, placeholder := range placeholders {
+		if pos := strings.Index(format, placeholder.name); pos >= 0 {
+			occurrences = append(occurrences, occurrence{pos: pos, index: index})
+		}
+	}
+	sort.Slice(occurrences, func(i, j int) bool { return occurrences[i].pos < occurrences[j].pos })
+
+	parts := make([]positionalPart, 0, len(occurrences)+1)
+	start := 0
+	for _, o := range occurrences {
+		placeholder := placeholders[o.index]
+		parts = append(parts, positionalPart{
+			text:   format[start:o.pos],
+			index:  o.index,
+			plural: placeholder,
+		})
+		start = o.pos + len(placeholder.name)
+	}
+	return append(parts, positionalPart{text: format[start:]})
 }
 
 // isPlaceholderName returns true if the name only consists of ASCII letters,
@@ -345,6 +388,8 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 			// NOTE: Majority of messages do not need to deal with plurals, thus it makes
 			//  sense to leave them with a nil map to save some memory space.
 			var placeholders map[int]*pluralPlaceholder
+			// namedPlurals is keyed by the content of the placeholder within the format,
+			// e.g. "file:count" for "${file:count}" that was parsed from "${file, count}".
 			var namedPlurals map[string]*pluralPlaceholder
 
 			format := k.String()
@@ -400,11 +445,10 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 
 			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
 			messages[key] = &Message{
-				pluralRule:   rule,
-				format:       format,
-				placeholders: placeholders,
-				namedPlurals: namedPlurals,
-				namedParts:   parseNamedParts(format, placeholders, namedPlurals),
+				pluralRule:      rule,
+				format:          format,
+				positionalParts: parsePositionalParts(format, placeholders, namedPlurals),
+				namedParts:      parseNamedParts(format, placeholders, namedPlurals),
 			}
 		}
 	}
