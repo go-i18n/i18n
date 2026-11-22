@@ -47,7 +47,6 @@ func TestStore_AddLocale_Limits(t *testing.T) {
 		{name: "long text", message: strings.Repeat("x", 2<<20) + " {name} %s"},
 		{name: "repeated positional plural", message: strings.Repeat("${file, 1}", 1100)},
 		{name: "named plurals at limit", message: strings.Repeat("${file, n}", 524)},
-		{name: "small width", message: "%-999[1]s %.3f %5.2f 100% done"},
 		{
 			name:    "named plurals over limit",
 			message: strings.Repeat("${file, n}", 525),
@@ -63,26 +62,6 @@ func TestStore_AddLocale_Limits(t *testing.T) {
 			message: strings.Repeat("{a}", 1001),
 			wantErr: `new locale: message "m::k": more than 1000 placeholders`,
 		},
-		{
-			name:    "too many format directives",
-			message: strings.Repeat("%[1]s", 1001),
-			wantErr: `new locale: message "m::k": more than 1000 format directives`,
-		},
-		{
-			name:    "large width",
-			message: "%9999[1]d",
-			wantErr: `new locale: message "m::k": format directive has a width or precision of more than 3 digits`,
-		},
-		{
-			name:    "large precision",
-			message: "%.1000s",
-			wantErr: `new locale: message "m::k": format directive has a width or precision of more than 3 digits`,
-		},
-		{
-			name:    "width from argument",
-			message: "%[1]*[1]d",
-			wantErr: `new locale: message "m::k": format directive "%[1]*" takes its width or precision from an argument`,
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -94,10 +73,47 @@ func TestStore_AddLocale_Limits(t *testing.T) {
 			}
 		})
 	}
+}
 
-	t.Run("width in plural form", func(t *testing.T) {
-		_, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\nfile.other = %9999[1]d\n[m]\nk = ${file, 1}\n"))
-		assert.EqualError(t, err, `new locale: message "m::k": format directive has a width or precision of more than 3 digits`)
+func TestLocale_Translate_UnsafeFormat(t *testing.T) {
+	const (
+		tooManyDigits = "<format directive has a width or precision of more than 3 digits>"
+		fromArgument  = "<format directive takes its width or precision from an argument>"
+		intoPlural    = "<format directive continues into a plural>"
+		openForm      = "<plural form ends within a format directive>"
+	)
+	tests := []struct {
+		name    string
+		plurals string
+		message string
+		want    string
+	}{
+		{name: "small widths", message: "%-3[1]d|%.2[1]d|100%% done", want: "1  |01|100% done"},
+		{name: "percent verb", message: "%5%%d", want: "%1"},
+		{name: "large width", message: "%9999[1]d", want: tooManyDigits},
+		{name: "large width after index", message: "%[1]9999d", want: tooManyDigits},
+		{name: "large precision", message: "%.1000s", want: tooManyDigits},
+		{name: "width after percent verb", message: "%0%%7000000d", want: tooManyDigits},
+		{name: "width from argument", message: "%[1]*[1]d", want: fromArgument},
+		{name: "too many directives", message: strings.Repeat("%[1]d", 1001), want: "<more than 1000 format directives>"},
+		{name: "large width in plural form", plurals: "f.other = %9999[1]d", message: "${f, 1}", want: tooManyDigits},
+		{name: "directive into plural", plurals: "f.other = 9999999[1]d", message: "%${f, 1}", want: intoPlural},
+		{name: "index into plural", plurals: "f.other = 1]9999999d", message: "%[${f, 1}", want: intoPlural},
+		{name: "directive out of plural", plurals: "f.other = %", message: "${f, 1}9999999d", want: openForm},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			l, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\n"+test.plurals+"\n[m]\nk = "+test.message+"\n"))
+			assert.Nil(t, err)
+			assert.Equal(t, test.want, l.Translate("m::k", 1))
+		})
+	}
+
+	t.Run("named translation is unaffected", func(t *testing.T) {
+		l, err := NewStore().AddLocale("en-US", "English", []byte("[m]\nk = {n}% *off* %9999d\n"))
+		assert.Nil(t, err)
+		assert.Equal(t, "50% *off* %9999d", l.TranslateNamed("m::k", "n", 50))
+		assert.Equal(t, fromArgument, l.Translate("m::k", 50))
 	})
 }
 
