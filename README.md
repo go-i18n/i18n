@@ -68,7 +68,7 @@ func main() {
 
 ### Named placeholders
 
-Pass `i18n.Args` as the sole argument to fill `{name}` placeholders by name. A name may contain ASCII letters, digits and underscores. The message is not formatted by `fmt.Sprintf`, so literal `%` characters are kept as-is. A placeholder without a matching argument is left unchanged, and a value is never substituted again even if it contains another placeholder.
+Use `TranslateNamed` (or `TranslateNamedWithFallback`) with name/value pairs to fill `{name}` placeholders by name. A name may contain ASCII letters, digits and underscores. The message is not formatted by `fmt.Sprintf`, so literal `%` characters are kept as-is. A placeholder without a matching argument is left unchanged, and a value is never substituted again even if it contains another placeholder.
 
 A plural can take its count from a named argument as well, e.g. `${file, count}`.
 
@@ -83,10 +83,10 @@ test4 = {user} changed {count} ${file, count}
 ```
 
 ```go
-fmt.Println(l1.Translate("messages::test3", i18n.Args{"name": "Joe"}))
+fmt.Println(l1.TranslateNamed("messages::test3", "name", "Joe"))
 // => "Hello, Joe!"
 
-fmt.Println(l1.Translate("messages::test4", i18n.Args{"user": "Joe", "count": 2}))
+fmt.Println(l1.TranslateNamed("messages::test4", "user", "Joe", "count", 2))
 // => "Joe changed 2 files"
 ```
 

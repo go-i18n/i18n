@@ -118,11 +118,6 @@ func (p *pluralPlaceholder) form(rule *plural.Rule, count interface{}) string {
 	return p.forms[form]
 }
 
-// Args contains named arguments to fill "{name}" placeholders of a message.
-// It takes effect only when passed as the sole argument for translating, e.g.
-// l.Translate("messages::test1", i18n.Args{"name": "Joe"}).
-type Args map[string]interface{}
-
 // Message represents a message in a locale.
 type Message struct {
 	pluralRule *plural.Rule
@@ -130,7 +125,7 @@ type Message struct {
 	// positionalParts is the format split for translating with positional
 	// arguments, nil when the format has no plural.
 	positionalParts []positionalPart
-	// namedParts is the format split for translating with Args, nil when the
+	// namedParts is the format split for translating with named arguments, nil when the
 	// format has no placeholder to fill.
 	namedParts []namedPart
 }
@@ -143,18 +138,10 @@ type namedPart struct {
 	plural *pluralPlaceholder
 }
 
-// Translate translates the message with the supplied list of arguments. When
-// the sole argument is Args, each "{name}" placeholder is replaced by the value
-// of the argument with the same name, and the message is not formatted by
-// fmt.Sprintf. A placeholder without a matching argument is left unchanged.
+// Translate translates the message with the supplied list of arguments.
 func (m *Message) Translate(args ...interface{}) string {
 	if len(args) == 0 {
 		return m.format
-	}
-	if len(args) == 1 {
-		if named, ok := args[0].(Args); ok {
-			return m.translateArgs(named)
-		}
 	}
 	if m.positionalParts == nil {
 		return fmt.Sprintf(m.format, args...)
@@ -241,7 +228,8 @@ func isPlaceholderName(name string) bool {
 	return true
 }
 
-// parseNamedParts splits the format into parts for translating with Args, in
+// parseNamedParts splits the format into parts for translating with named
+// arguments, in
 // a single pass so that a value containing a placeholder is never substituted
 // again.
 func parseNamedParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) []namedPart {
@@ -297,8 +285,23 @@ func parseNamedParts(format string, placeholders map[int]*pluralPlaceholder, nam
 	return append(parts, namedPart{text: text.String()})
 }
 
-// translateArgs translates the message with named arguments.
-func (m *Message) translateArgs(args Args) string {
+// namedArg returns the value of the named argument in name/value pairs.
+func namedArg(pairs []interface{}, name string) (interface{}, bool) {
+	// Messages have few placeholders, so a linear scan beats building a map.
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if n, ok := pairs[i].(string); ok && n == name {
+			return pairs[i+1], true
+		}
+	}
+	return nil, false
+}
+
+// TranslateNamed translates the message with named arguments given as
+// name/value pairs, e.g. TranslateNamed("path", "README.md", "repo", "gogs").
+// Each "{name}" placeholder is replaced by the value of the argument with the
+// same name, and the message is not formatted by fmt.Sprintf. A placeholder
+// without a matching argument is left unchanged.
+func (m *Message) TranslateNamed(pairs ...interface{}) string {
 	if m.namedParts == nil {
 		return m.format
 	}
@@ -309,7 +312,7 @@ func (m *Message) translateArgs(args Args) string {
 		b.WriteString(p.text)
 		switch {
 		case p.plural != nil:
-			count, ok := args[p.plural.arg]
+			count, ok := namedArg(pairs, p.plural.arg)
 			if ok {
 				b.WriteString(p.plural.form(m.pluralRule, count))
 			} else {
@@ -318,7 +321,7 @@ func (m *Message) translateArgs(args Args) string {
 				b.WriteByte('>')
 			}
 		case p.name != "":
-			value, ok := args[p.name]
+			value, ok := namedArg(pairs, p.name)
 			if !ok {
 				b.WriteByte('{')
 				b.WriteString(p.name)
@@ -470,8 +473,7 @@ func (l *Locale) Description() string {
 	return l.desc
 }
 
-// Translate uses the locale to translate the message of the given key. Pass
-// Args as the sole argument to fill named placeholders, see Message.Translate.
+// Translate uses the locale to translate the message of the given key.
 func (l *Locale) Translate(key string, args ...interface{}) string {
 	return l.TranslateWithFallback(nil, key, args...)
 }
@@ -488,4 +490,23 @@ func (l *Locale) TranslateWithFallback(fallback *Locale, key string, args ...int
 		return fmt.Sprintf("<no such key: %s>", key)
 	}
 	return m.Translate(args...)
+}
+
+// TranslateNamed uses the locale to translate the message of the given key with
+// named arguments given as name/value pairs, see Message.TranslateNamed.
+func (l *Locale) TranslateNamed(key string, pairs ...interface{}) string {
+	return l.TranslateNamedWithFallback(nil, key, pairs...)
+}
+
+// TranslateNamedWithFallback is like TranslateNamed but attempts to use the
+// `fallback` to translate if the given key does not exist in the locale.
+func (l *Locale) TranslateNamedWithFallback(fallback *Locale, key string, pairs ...interface{}) string {
+	m, ok := l.messages[key]
+	if !ok {
+		if fallback != nil {
+			return fallback.TranslateNamed(key, pairs...)
+		}
+		return fmt.Sprintf("<no such key: %s>", key)
+	}
+	return m.TranslateNamed(pairs...)
 }
