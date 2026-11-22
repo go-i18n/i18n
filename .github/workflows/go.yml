@@ -5,14 +5,19 @@ on:
     paths:
       - '**.go'
       - 'go.mod'
+      - 'go.sum'
       - '.golangci.yml'
       - '.github/workflows/go.yml'
   pull_request:
     paths:
       - '**.go'
       - 'go.mod'
+      - 'go.sum'
       - '.golangci.yml'
       - '.github/workflows/go.yml'
+permissions:
+  contents: read
+
 env:
   GOPROXY: "https://proxy.golang.org"
 
@@ -22,31 +27,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Go
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          version: latest
+          go-version: 1.27.x
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
           args: --timeout=30m
 
   test:
     name: Test
     strategy:
       matrix:
-        go-version: [ 1.16.x, 1.17.x ]
+        go-version: [ 1.27.x ]
         platform: [ ubuntu-latest, macos-latest, windows-latest ]
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Install Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ matrix.go-version }}
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run tests with coverage
         run: go test -v -race -coverprofile=coverage -covermode=atomic ./...
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v1.5.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
-          file: ./coverage
+          files: ./coverage
           flags: unittests

@@ -9,7 +9,7 @@ Package i18n provides internationalization and localization for your Go applicat
 
 ## Installation
 
-The minimum requirement of Go is **1.16**.
+The minimum requirement of Go is **1.27**.
 
 	go get unknwon.dev/i18n
 
@@ -64,6 +64,30 @@ func main() {
 	fmt.Println(l2.TranslateWithFallback(l1, "messages::test2", 1))
 	// => "I have 1 dog"
 }
+```
+
+### Named placeholders
+
+Use `TranslateNamed` (or `TranslateNamedWithFallback`) with name/value pairs to fill `{name}` placeholders by name. A name may contain ASCII letters, digits and underscores. The message is not formatted by `fmt.Sprintf`, so literal `%` characters are kept as-is. A placeholder without a matching argument is left unchanged, and a value is never substituted again even if it contains another placeholder.
+
+A plural can take its count from a named argument as well, e.g. `${file, count}`.
+
+```ini
+[plurals]
+file.one = file
+file.other = files
+
+[messages]
+test3 = Hello, {name}!
+test4 = {user} changed {count} ${file, count}
+```
+
+```go
+fmt.Println(l1.TranslateNamed("messages::test3", "name", "Joe"))
+// => "Hello, Joe!"
+
+fmt.Println(l1.TranslateNamed("messages::test4", "user", "Joe", "count", 2))
+// => "Joe changed 2 files"
 ```
 
 ## License

@@ -91,6 +91,9 @@ func newOperandsInt64(i int64) *Operands {
 }
 
 func newOperandsString(s string) (*Operands, error) {
+	if s == "" {
+		return nil, fmt.Errorf("empty number")
+	}
 	if s[0] == '-' {
 		s = s[1:]
 	}

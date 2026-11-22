@@ -9,7 +9,6 @@ import (
 	"encoding/xml"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"text/template"
 )
@@ -33,7 +32,7 @@ func main() {
 	flag.StringVar(&tout, "tout", "", "the test output file")
 	flag.Parse()
 
-	buf, err := ioutil.ReadFile(in)
+	buf, err := os.ReadFile(in)
 	if err != nil {
 		fatalf("failed to read file: %s", err)
 	}
