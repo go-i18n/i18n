@@ -308,6 +308,21 @@ func TestLocale_TranslateNamed(t *testing.T) {
 		got := l.Translate("messages::plural", 1)
 		assert.Equal(t, "Changed {count} <no arg for name count>%!(EXTRA int=1)", got)
 	})
+
+	t.Run("named plural without args", func(t *testing.T) {
+		got := l.Translate("messages::plural")
+		assert.Equal(t, "Changed {count} <no arg for name count>", got)
+	})
+
+	t.Run("empty count", func(t *testing.T) {
+		got := l.TranslateNamed("messages::plural", "count", "")
+		assert.Equal(t, "Changed  <empty number>", got)
+	})
+
+	t.Run("invalid count does not inject format verbs", func(t *testing.T) {
+		got := l.Translate("messages::both", "x%s%d")
+		assert.Equal(t, `Changed %!d(string=x%s%d) <strconv.ParseFloat: parsing "x%s%d": invalid syntax>`, got)
+	})
 }
 
 func TestLocale_TranslateNamedWithFallback(t *testing.T) {

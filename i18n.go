@@ -7,7 +7,6 @@ package i18n
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -105,17 +104,17 @@ type pluralPlaceholder struct {
 }
 
 // form returns the plural form that matches the given count.
-func (p *pluralPlaceholder) form(rule *plural.Rule, count interface{}) string {
+func (p *pluralPlaceholder) form(rule *plural.Rule, count interface{}) (string, error) {
 	ops, err := plural.NewOperands(count)
 	if err != nil {
-		return fmt.Sprintf("<%v>", err)
+		return "", err
 	}
 
 	form := plural.Other
 	if rule != nil {
 		form = rule.PluralFormFunc(ops)
 	}
-	return p.forms[form]
+	return p.forms[form], nil
 }
 
 // Message represents a message in a locale.
@@ -158,7 +157,12 @@ func (m *Message) Translate(args ...interface{}) string {
 			b.WriteString(strconv.Itoa(p.index))
 			b.WriteByte('>')
 		default:
-			b.WriteString(p.plural.form(m.pluralRule, args[p.index-1]))
+			form, err := p.plural.form(m.pluralRule, args[p.index-1])
+			if err != nil {
+				// The error may quote the argument, which must not add verbs to the format.
+				form = strings.ReplaceAll("<"+err.Error()+">", "%", "%%")
+			}
+			b.WriteString(form)
 		}
 	}
 	return fmt.Sprintf(b.String(), args...)
@@ -175,40 +179,68 @@ type positionalPart struct {
 // parsePositionalParts splits the format into parts for translating with
 // positional arguments, nil when the format has no plural. Only the first
 // occurrence of each positional plural is filled, and named plurals are
+// reported as missing arguments. It also returns the format with named plurals
 // reported as missing arguments.
-func parsePositionalParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) []positionalPart {
+func parsePositionalParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) ([]positionalPart, string) {
 	if len(placeholders) == 0 && len(namedPlurals) == 0 {
-		return nil
+		return nil, format
 	}
 
-	for _, placeholder := range namedPlurals {
-		format = strings.ReplaceAll(format, placeholder.name, "<no arg for name "+placeholder.arg+">")
-	}
-
-	type occurrence struct {
-		pos   int
-		index int
-	}
-	occurrences := make([]occurrence, 0, len(placeholders))
-	for index, placeholder := range placeholders {
-		if pos := strings.Index(format, placeholder.name); pos >= 0 {
-			occurrences = append(occurrences, occurrence{pos: pos, index: index})
+	// A single pass keeps loading linear in the length of the format.
+	var parts []positionalPart
+	var text, positional strings.Builder
+	filled := make(map[int]bool, len(placeholders))
+	rest := format
+	for {
+		open := strings.Index(rest, "${")
+		if open < 0 {
+			break
 		}
-	}
-	sort.Slice(occurrences, func(i, j int) bool { return occurrences[i].pos < occurrences[j].pos })
+		// Placeholder names have no "$", "{" or "}", so each byte is scanned at
+		// most once.
+		end := open + 2
+		for end < len(rest) && rest[end] != '$' && rest[end] != '{' && rest[end] != '}' {
+			end++
+		}
+		if end == len(rest) || rest[end] != '}' {
+			text.WriteString(rest[:open+1])
+			positional.WriteString(rest[:open+1])
+			rest = rest[open+1:]
+			continue
+		}
 
-	parts := make([]positionalPart, 0, len(occurrences)+1)
-	start := 0
-	for _, o := range occurrences {
-		placeholder := placeholders[o.index]
-		parts = append(parts, positionalPart{
-			text:   format[start:o.pos],
-			index:  o.index,
-			plural: placeholder,
-		})
-		start = o.pos + len(placeholder.name)
+		name := rest[open+2 : end]
+		if placeholder, ok := namedPlurals[name]; ok {
+			missing := "<no arg for name " + placeholder.arg + ">"
+			text.WriteString(rest[:open])
+			text.WriteString(missing)
+			positional.WriteString(rest[:open])
+			positional.WriteString(missing)
+			rest = rest[end+1:]
+			continue
+		}
+
+		index, err := strconv.Atoi(name)
+		if placeholder, ok := placeholders[index]; err == nil && ok && !filled[index] && placeholder.name == rest[open:end+1] {
+			filled[index] = true
+			text.WriteString(rest[:open])
+			parts = append(parts, positionalPart{text: text.String(), index: index, plural: placeholder})
+			text.Reset()
+		} else {
+			text.WriteString(rest[:end+1])
+		}
+		positional.WriteString(rest[:end+1])
+		rest = rest[end+1:]
 	}
-	return append(parts, positionalPart{text: format[start:]})
+	text.WriteString(rest)
+	positional.WriteString(rest)
+	return append(parts, positionalPart{text: text.String()}), positional.String()
+}
+
+// isPlaceholderNameByte returns true if c is an ASCII letter, digit or
+// underscore.
+func isPlaceholderNameByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_'
 }
 
 // isPlaceholderName returns true if the name only consists of ASCII letters,
@@ -218,10 +250,7 @@ func isPlaceholderName(name string) bool {
 		return false
 	}
 	for i := 0; i < len(name); i++ {
-		c := name[i]
-		switch {
-		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '_':
-		default:
+		if !isPlaceholderNameByte(name[i]) {
 			return false
 		}
 	}
@@ -229,59 +258,61 @@ func isPlaceholderName(name string) bool {
 }
 
 // parseNamedParts splits the format into parts for translating with named
-// arguments, in
-// a single pass so that a value containing a placeholder is never substituted
-// again.
+// arguments, in a single pass so that a value containing a placeholder is never
+// substituted again.
 func parseNamedParts(format string, placeholders map[int]*pluralPlaceholder, namedPlurals map[string]*pluralPlaceholder) []namedPart {
 	var parts []namedPart
 	var text strings.Builder
-	rest := format
+	start := 0 // The start of the format that is not yet written to text.
+	next := 0  // Where to look for the next placeholder.
 	for {
-		open := strings.IndexByte(rest, '{')
-		if open < 0 {
+		n := strings.IndexByte(format[next:], '{')
+		if n < 0 {
 			break
 		}
-		n := strings.IndexByte(rest[open+1:], '}')
+		open := next + n
+		n = strings.IndexByte(format[open+1:], '}')
 		if n < 0 {
 			break
 		}
 		end := open + 1 + n
-		name := rest[open+1 : end]
+		// Only the last brace before the closing one may open a placeholder,
+		// e.g. "{{name}", and skipping the others keeps loading linear.
+		open += strings.LastIndexByte(format[open:end], '{')
+		name := format[open+1 : end]
+		next = end + 1
 
-		if open > 0 && rest[open-1] == '$' {
+		if open > 0 && format[open-1] == '$' {
 			if placeholder, ok := namedPlurals[name]; ok {
-				text.WriteString(rest[:open-1])
+				text.WriteString(format[start : open-1])
 				parts = append(parts, namedPart{text: text.String(), plural: placeholder})
 				text.Reset()
-				rest = rest[end+1:]
+				start = next
 				continue
 			}
 
 			index, err := strconv.Atoi(name)
 			if _, ok := placeholders[index]; err == nil && ok {
-				text.WriteString(rest[:open-1])
+				text.WriteString(format[start : open-1])
 				text.WriteString("<no arg for index " + strconv.Itoa(index) + ">")
-				rest = rest[end+1:]
+				start = next
 				continue
 			}
 		}
 
 		if !isPlaceholderName(name) {
-			// The brace may still open a placeholder, e.g. "{{name}".
-			text.WriteString(rest[:open+1])
-			rest = rest[open+1:]
 			continue
 		}
 
-		text.WriteString(rest[:open])
+		text.WriteString(format[start:open])
 		parts = append(parts, namedPart{text: text.String(), name: name})
 		text.Reset()
-		rest = rest[end+1:]
+		start = next
 	}
 	if parts == nil && text.Len() == 0 {
 		return nil
 	}
-	text.WriteString(rest)
+	text.WriteString(format[start:])
 	return append(parts, namedPart{text: text.String()})
 }
 
@@ -314,7 +345,11 @@ func (m *Message) TranslateNamed(pairs ...interface{}) string {
 		case p.plural != nil:
 			count, ok := namedArg(pairs, p.plural.arg)
 			if ok {
-				b.WriteString(p.plural.form(m.pluralRule, count))
+				form, err := p.plural.form(m.pluralRule, count)
+				if err != nil {
+					form = "<" + err.Error() + ">"
+				}
+				b.WriteString(form)
 			} else {
 				b.WriteString("<no arg for name ")
 				b.WriteString(p.plural.arg)
@@ -447,10 +482,11 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 			}
 
 			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
+			positionalParts, positionalFormat := parsePositionalParts(format, placeholders, namedPlurals)
 			messages[key] = &Message{
 				pluralRule:      rule,
-				format:          format,
-				positionalParts: parsePositionalParts(format, placeholders, namedPlurals),
+				format:          positionalFormat,
+				positionalParts: positionalParts,
 				namedParts:      parseNamedParts(format, placeholders, namedPlurals),
 			}
 		}
