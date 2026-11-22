@@ -3,6 +3,8 @@ package i18n
 import (
 	"fmt"
 	"math"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +30,34 @@ test1 = I have %[1]d ${cat, 0}
 		got := fmt.Sprintf("%v", err)
 		want := `new locale: the smallest index is 1 but got 0 for "${cat, 0}"`
 		assert.Equal(t, want, got)
+	})
+}
+
+func TestStore_AddLocale_MaxMessageLen(t *testing.T) {
+	form := strings.Repeat("x", 1000)
+	for _, placeholder := range []string{"${file, n}", "${file, 1}"} {
+		t.Run(placeholder, func(t *testing.T) {
+			source := "[plurals]\nfile.other = " + form + "\n[m]\n"
+			_, err := NewStore().AddLocale("en-US", "English", []byte(source+"k = "+strings.Repeat(placeholder, 1000)+"\n"))
+			assert.Nil(t, err)
+
+			_, err = NewStore().AddLocale("en-US", "English", []byte(source+"k = "+strings.Repeat(placeholder, 1100)+"\n"))
+			if placeholder == "${file, 1}" {
+				// Only the first occurrence of a positional plural is filled.
+				assert.Nil(t, err)
+				return
+			}
+			assert.EqualError(t, err, `new locale: message "m::k" may expand to 1100000 bytes of plurals, more than 1048576`)
+		})
+	}
+
+	t.Run("distinct indexes", func(t *testing.T) {
+		var b strings.Builder
+		for i := 1; i <= 1100; i++ {
+			b.WriteString("${file, " + strconv.Itoa(i) + "}")
+		}
+		_, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\nfile.other = "+form+"\n[m]\nk = "+b.String()+"\n"))
+		assert.ErrorContains(t, err, `may expand to`)
 	})
 }
 

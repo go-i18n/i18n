@@ -292,7 +292,7 @@ func parseNamedParts(format string, placeholders map[int]*pluralPlaceholder, nam
 			}
 
 			index, err := strconv.Atoi(name)
-			if _, ok := placeholders[index]; err == nil && ok {
+			if placeholder, ok := placeholders[index]; err == nil && ok && placeholder.name == format[open-1:end+1] {
 				text.WriteString(format[start : open-1])
 				text.WriteString("<no arg for index " + strconv.Itoa(index) + ">")
 				start = next
@@ -483,11 +483,15 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 
 			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
 			positionalParts, positionalFormat := parsePositionalParts(format, placeholders, namedPlurals)
+			namedParts := parseNamedParts(format, placeholders, namedPlurals)
+			if n := maxPluralsLen(positionalParts, namedParts); n > maxMessageLen {
+				return nil, errors.Errorf("message %q may expand to %d bytes of plurals, more than %d", key, n, maxMessageLen)
+			}
 			messages[key] = &Message{
 				pluralRule:      rule,
 				format:          positionalFormat,
 				positionalParts: positionalParts,
-				namedParts:      parseNamedParts(format, placeholders, namedPlurals),
+				namedParts:      namedParts,
 			}
 		}
 	}
@@ -497,6 +501,44 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 		desc:     desc,
 		messages: messages,
 	}, nil
+}
+
+// maxMessageLen is the most bytes a translated message may get from the text
+// and plural forms of its format, which stops a crafted locale file from making
+// a single translation allocate without bound.
+const maxMessageLen = 1 << 20
+
+// maxPluralsLen returns the most bytes the text and plural forms of the parts
+// may expand to when translating either with positional or named arguments.
+func maxPluralsLen(positionalParts []positionalPart, namedParts []namedPart) int {
+	longest := func(p *pluralPlaceholder) int {
+		n := 0
+		for _, form := range p.forms {
+			if len(form) > n {
+				n = len(form)
+			}
+		}
+		return n
+	}
+
+	positional := 0
+	for _, p := range positionalParts {
+		positional += len(p.text)
+		if p.plural != nil {
+			positional += longest(p.plural)
+		}
+	}
+	named := 0
+	for _, p := range namedParts {
+		named += len(p.text)
+		if p.plural != nil {
+			named += longest(p.plural)
+		}
+	}
+	if positional > named {
+		return positional
+	}
+	return named
 }
 
 // Lang returns the BCP 47 language name of the locale.

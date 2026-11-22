@@ -9,7 +9,7 @@ Package i18n provides internationalization and localization for your Go applicat
 
 ## Installation
 
-The minimum requirement of Go is **1.16**.
+The minimum requirement of Go is **1.27**.
 
 	go get unknwon.dev/i18n
 
