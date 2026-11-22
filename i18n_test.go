@@ -33,31 +33,71 @@ test1 = I have %[1]d ${cat, 0}
 	})
 }
 
-func TestStore_AddLocale_MaxMessageLen(t *testing.T) {
-	form := strings.Repeat("x", 1000)
-	for _, placeholder := range []string{"${file, n}", "${file, 1}"} {
-		t.Run(placeholder, func(t *testing.T) {
-			source := "[plurals]\nfile.other = " + form + "\n[m]\n"
-			_, err := NewStore().AddLocale("en-US", "English", []byte(source+"k = "+strings.Repeat(placeholder, 1000)+"\n"))
-			assert.Nil(t, err)
-
-			_, err = NewStore().AddLocale("en-US", "English", []byte(source+"k = "+strings.Repeat(placeholder, 1100)+"\n"))
-			if placeholder == "${file, 1}" {
-				// Only the first occurrence of a positional plural is filled.
+func TestStore_AddLocale_Limits(t *testing.T) {
+	form := strings.Repeat("x", 2000)
+	var indexes strings.Builder
+	for i := 1; i <= 1100; i++ {
+		indexes.WriteString("${file, " + strconv.Itoa(i) + "}")
+	}
+	tests := []struct {
+		name    string
+		message string
+		wantErr string
+	}{
+		{name: "long text", message: strings.Repeat("x", 2<<20) + " {name} %s"},
+		{name: "repeated positional plural", message: strings.Repeat("${file, 1}", 1100)},
+		{name: "named plurals at limit", message: strings.Repeat("${file, n}", 524)},
+		{name: "small width", message: "%-999[1]s %.3f %5.2f 100% done"},
+		{
+			name:    "named plurals over limit",
+			message: strings.Repeat("${file, n}", 525),
+			wantErr: `new locale: message "m::k": plurals may expand to more than 1048576 bytes`,
+		},
+		{
+			name:    "distinct positional plurals",
+			message: indexes.String(),
+			wantErr: `new locale: message "m::k": plurals may expand to more than 1048576 bytes`,
+		},
+		{
+			name:    "too many named placeholders",
+			message: strings.Repeat("{a}", 1001),
+			wantErr: `new locale: message "m::k": more than 1000 placeholders`,
+		},
+		{
+			name:    "too many format directives",
+			message: strings.Repeat("%[1]s", 1001),
+			wantErr: `new locale: message "m::k": more than 1000 format directives`,
+		},
+		{
+			name:    "large width",
+			message: "%9999[1]d",
+			wantErr: `new locale: message "m::k": format directive has a width or precision of more than 3 digits`,
+		},
+		{
+			name:    "large precision",
+			message: "%.1000s",
+			wantErr: `new locale: message "m::k": format directive has a width or precision of more than 3 digits`,
+		},
+		{
+			name:    "width from argument",
+			message: "%[1]*[1]d",
+			wantErr: `new locale: message "m::k": format directive "%[1]*" takes its width or precision from an argument`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\nfile.other = "+form+"\n[m]\nk = "+test.message+"\n"))
+			if test.wantErr == "" {
 				assert.Nil(t, err)
-				return
+			} else {
+				assert.EqualError(t, err, test.wantErr)
 			}
-			assert.EqualError(t, err, `new locale: message "m::k" may expand to 1100000 bytes of plurals, more than 1048576`)
 		})
 	}
 
-	t.Run("distinct indexes", func(t *testing.T) {
-		var b strings.Builder
-		for i := 1; i <= 1100; i++ {
-			b.WriteString("${file, " + strconv.Itoa(i) + "}")
-		}
-		_, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\nfile.other = "+form+"\n[m]\nk = "+b.String()+"\n"))
-		assert.ErrorContains(t, err, `may expand to`)
+	t.Run("width in plural form", func(t *testing.T) {
+		_, err := NewStore().AddLocale("en-US", "English", []byte("[plurals]\nfile.other = %9999[1]d\n[m]\nk = ${file, 1}\n"))
+		assert.EqualError(t, err, `new locale: message "m::k": format directive has a width or precision of more than 3 digits`)
 	})
 }
 

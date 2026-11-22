@@ -484,8 +484,8 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 			key := strings.TrimPrefix(s.Name()+"::"+k.Name(), ini.DefaultSection+"::")
 			positionalParts, positionalFormat := parsePositionalParts(format, placeholders, namedPlurals)
 			namedParts := parseNamedParts(format, placeholders, namedPlurals)
-			if n := maxPluralsLen(positionalParts, namedParts); n > maxMessageLen {
-				return nil, errors.Errorf("message %q may expand to %d bytes of plurals, more than %d", key, n, maxMessageLen)
+			if err := checkMessageLimits(positionalFormat, positionalParts, namedParts); err != nil {
+				return nil, errors.Wrapf(err, "message %q", key)
 			}
 			messages[key] = &Message{
 				pluralRule:      rule,
@@ -503,42 +503,129 @@ func newLocale(tag language.Tag, desc string, rule *plural.Rule, file *ini.File)
 	}, nil
 }
 
-// maxMessageLen is the most bytes a translated message may get from the text
-// and plural forms of its format, which stops a crafted locale file from making
-// a single translation allocate without bound.
-const maxMessageLen = 1 << 20
+// Limits of a message that stop a crafted locale file from making a single
+// translation allocate far more than the message and its arguments.
+const (
+	// maxPluralsLen is the most bytes of plural forms a message may expand to.
+	maxPluralsLen = 1 << 20
+	// maxPlaceholders is the most placeholders and format directives a message
+	// may have, each of which may repeat an argument.
+	maxPlaceholders = 1000
+	// maxDirectiveDigits is the most digits of the width or precision of a
+	// format directive.
+	maxDirectiveDigits = 3
+)
 
-// maxPluralsLen returns the most bytes the text and plural forms of the parts
-// may expand to when translating either with positional or named arguments.
-func maxPluralsLen(positionalParts []positionalPart, namedParts []namedPart) int {
-	longest := func(p *pluralPlaceholder) int {
-		n := 0
-		for _, form := range p.forms {
-			if len(form) > n {
-				n = len(form)
+// checkMessageLimits returns an error if translating the message may expand
+// beyond the limits above.
+func checkMessageLimits(positionalFormat string, positionalParts []positionalPart, namedParts []namedPart) error {
+	longest := func(p *pluralPlaceholder) (string, int) {
+		form := ""
+		for _, f := range p.forms {
+			if len(f) > len(form) {
+				form = f
 			}
 		}
-		return n
+		return form, len(form)
 	}
 
-	positional := 0
+	// Plural forms are formatted by fmt.Sprintf along with the format.
+	directives, err := countDirectives(positionalFormat)
+	if err != nil {
+		return err
+	}
+	pluralsLen := 0
 	for _, p := range positionalParts {
-		positional += len(p.text)
-		if p.plural != nil {
-			positional += longest(p.plural)
+		if p.plural == nil {
+			continue
+		}
+		for _, form := range p.plural.forms {
+			n, err := countDirectives(form)
+			if err != nil {
+				return err
+			}
+			directives += n
+		}
+		_, n := longest(p.plural)
+		pluralsLen += n
+		// Checking on every addition keeps the sum from overflowing.
+		if pluralsLen > maxPluralsLen {
+			return errors.Errorf("plurals may expand to more than %d bytes", maxPluralsLen)
+		}
+		if directives > maxPlaceholders {
+			return errors.Errorf("more than %d format directives", maxPlaceholders)
 		}
 	}
-	named := 0
+	if directives > maxPlaceholders {
+		return errors.Errorf("more than %d format directives", maxPlaceholders)
+	}
+
+	pluralsLen = 0
+	placeholders := 0
 	for _, p := range namedParts {
-		named += len(p.text)
+		if p.plural == nil && p.name == "" {
+			continue
+		}
+		placeholders++
+		if placeholders > maxPlaceholders {
+			return errors.Errorf("more than %d placeholders", maxPlaceholders)
+		}
 		if p.plural != nil {
-			named += longest(p.plural)
+			_, n := longest(p.plural)
+			pluralsLen += n
+			if pluralsLen > maxPluralsLen {
+				return errors.Errorf("plurals may expand to more than %d bytes", maxPluralsLen)
+			}
 		}
 	}
-	if positional > named {
-		return positional
+	return nil
+}
+
+// countDirectives returns the number of fmt directives in the format, or an
+// error if a directive has a width or precision that is too large or given by
+// an argument with "*".
+func countDirectives(format string) (int, error) {
+	n := 0
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			continue
+		}
+		i++
+		if i < len(format) && format[i] == '%' {
+			continue
+		}
+		n++
+
+		for i < len(format) && strings.IndexByte("+-# 0", format[i]) >= 0 {
+			i++
+		}
+		for pass := 0; pass < 2; pass++ { // The width, then the precision.
+			if i < len(format) && format[i] == '[' {
+				if end := strings.IndexByte(format[i:], ']'); end >= 0 {
+					i += end + 1
+				}
+			}
+			if i < len(format) && format[i] == '*' {
+				return 0, errors.Errorf("format directive %q takes its width or precision from an argument", format[:i+1])
+			}
+			digits := 0
+			for i < len(format) && '0' <= format[i] && format[i] <= '9' {
+				digits++
+				i++
+			}
+			if digits > maxDirectiveDigits {
+				return 0, errors.Errorf("format directive has a width or precision of more than %d digits", maxDirectiveDigits)
+			}
+			if pass == 0 && i < len(format) && format[i] == '.' {
+				i++
+				continue
+			}
+			break
+		}
+		// Step back so the loop does not skip the verb if it is another "%".
+		i--
 	}
-	return named
+	return n, nil
 }
 
 // Lang returns the BCP 47 language name of the locale.
