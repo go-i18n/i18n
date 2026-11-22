@@ -13,6 +13,9 @@ on:
       - 'go.mod'
       - '.golangci.yml'
       - '.github/workflows/go.yml'
+permissions:
+  contents: read
+
 env:
   GOPROXY: "https://proxy.golang.org"
 
@@ -30,7 +33,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: latest
+          version: v2.15.0
           args: --timeout=30m
 
   test:
