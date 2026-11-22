@@ -667,8 +667,11 @@ func countDirectives(format string) (n int, open bool, err error) {
 		for i < len(format) && strings.IndexByte("+-# 0", format[i]) >= 0 {
 			i++
 		}
+		afterIndex := false
 		for pass := 0; pass < 2; pass++ { // The width, then the precision.
+			before := i
 			i = skipArgIndex(i)
+			afterIndex = i != before
 			if i < len(format) && format[i] == '*' {
 				return 0, false, errors.New("format directive takes its width or precision from an argument")
 			}
@@ -685,6 +688,9 @@ func countDirectives(format string) (n int, open bool, err error) {
 				continue
 			}
 			break
+		}
+		if afterIndex && i < len(format) && format[i] == '[' {
+			badIndex = true // fmt.Sprintf takes this "[" as the verb, not as an argument index.
 		}
 		i = skipArgIndex(i)
 		if badIndex {
